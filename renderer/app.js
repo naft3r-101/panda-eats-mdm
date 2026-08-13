@@ -278,6 +278,8 @@ function setBusy(busy) {
   $('setWallpaper').textContent = wallpaperLocked ? 'Blocked by device policy' : 'Send to tablet';
   $('chooseWallpaper').disabled = busy;
   $('openUpdate').disabled = !ready;
+  $('rebootDevice').disabled = !ready;
+  $('powerOffDevice').disabled = !ready;
   $('disableSelected').disabled = !ready || discoverPicked.size === 0;
   $('disableSelected').textContent =
     discoverPicked.size === 0 ? 'Disable selected' : `Disable ${plural(discoverPicked.size, 'package')}`;
@@ -957,6 +959,51 @@ $('openUpdate').addEventListener('click', async () => {
     setBusy(false);
   }
 });
+
+// --- Power -----------------------------------------------------------------
+
+/**
+ * Both actions take the tablet off adb, so the device list is re-read
+ * afterwards rather than left showing a serial that is no longer there.
+ *
+ * The audit and plan are thrown away explicitly rather than left to
+ * refreshDevices() to clear. `adb reboot` returns the instant the command is
+ * accepted, well before the tablet actually goes away, so a re-read taken
+ * immediately afterwards can still list it as usable and keep it selected -
+ * with an audit describing a device that is now restarting. Apply builds from
+ * that picture, and firing a run at a tablet mid-restart is the exact failure
+ * this app already had to be taught to stop doing.
+ */
+async function powerAction(fn, verb) {
+  if (!state.selected) return;
+  logTarget = 'installLog';
+  setBusy(true);
+  let acted = false;
+  try {
+    const r = await call(fn, state.selected);
+    if (!r.confirmed) return;
+    acted = true;
+    logLine({
+      level: r.ok ? 'ok' : 'warn',
+      message: r.ok ? `${verb} ${state.selected}` : `Could not ${verb.toLowerCase()} the tablet. ${r.stderr || ''}`.trim(),
+    });
+  } catch (err) {
+    logLine({ level: 'error', message: err.message });
+  } finally {
+    setBusy(false);
+  }
+
+  if (acted) {
+    state.report = null;
+    state.plan = null;
+    renderPlan(null);
+    setBusy(false);
+  }
+  await refreshDevices();
+}
+
+$('rebootDevice').addEventListener('click', () => powerAction(window.bench.rebootDevice, 'Rebooting'));
+$('powerOffDevice').addEventListener('click', () => powerAction(window.bench.powerOffDevice, 'Powering off'));
 
 // --------------------------------------------------------------------------
 // Discover

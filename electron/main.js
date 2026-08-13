@@ -166,6 +166,48 @@ handle('play:open', async (event, serial, pkg) =>
 
 handle('app:launch', async (event, serial, pkg) => adb.launchApp(serial, pkg));
 
+// --- Power ------------------------------------------------------------------
+
+/**
+ * Both power actions interrupt whatever the tablet is doing, and powering off
+ * cannot be undone from here at all. The confirmation lives in main rather than
+ * in the renderer so it cannot be skipped by a stray click path in the UI.
+ */
+async function confirmPowerAction({ message, detail, confirmLabel }) {
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: [confirmLabel, 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Panda Bench',
+    message,
+    detail,
+  });
+  return response === 0;
+}
+
+handle('device:reboot', async (event, serial) => {
+  const confirmed = await confirmPowerAction({
+    message: `Reboot ${serial}?`,
+    detail:
+      'The tablet drops off USB for about a minute while it restarts, then comes back on its own. Do not do this in the middle of a provisioning run.',
+    confirmLabel: 'Reboot',
+  });
+  if (!confirmed) return { confirmed: false, ok: false };
+  return { confirmed: true, ...(await adb.rebootDevice(serial)) };
+});
+
+handle('device:poweroff', async (event, serial) => {
+  const confirmed = await confirmPowerAction({
+    message: `Power off ${serial}?`,
+    detail:
+      'There is no way to turn it back on over USB. Someone has to press the power button on the tablet itself.',
+    confirmLabel: 'Power off',
+  });
+  if (!confirmed) return { confirmed: false, ok: false };
+  return { confirmed: true, ...(await adb.powerOffDevice(serial)) };
+});
+
 // --- Wallpaper + system update ---------------------------------------------
 
 /** Wallpapers that ship with the app, plus whatever the operator picks. */

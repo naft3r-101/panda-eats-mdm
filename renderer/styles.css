@@ -361,6 +361,22 @@ button {
   background: #b91c1c;
 }
 
+/* A destructive action that is not the primary one on its card: reads as
+   secondary until you look at it, then reads as a warning. */
+.ghost-btn.danger {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.ghost-btn.danger:hover:not(:disabled) {
+  background: var(--red-bg);
+}
+
+.ghost-btn.danger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .hint {
   color: var(--zinc-500);
   font-size: 12.5px;

@@ -598,6 +598,48 @@ async function trimCaches(serial) {
 }
 
 // ---------------------------------------------------------------------------
+// Power
+// ---------------------------------------------------------------------------
+
+/**
+ * Reboot the tablet.
+ *
+ * The device drops off adb for roughly a minute afterwards, so the caller has
+ * to expect it to vanish from the device list and come back on its own.
+ *
+ * Losing the connection is the SUCCESS case for both of these, not a failure:
+ * adb stops answering precisely because the command worked. deviceWentDown()
+ * exists to spot a tablet dying unexpectedly mid-run, so here its signatures
+ * mean the opposite of what they usually do and are treated as confirmation.
+ */
+async function rebootDevice(serial) {
+  const r = await run(['reboot'], { serial });
+  return { ok: r.ok || deviceWentDown(r), stderr: r.stderr };
+}
+
+/**
+ * Power the tablet off.
+ *
+ * `adb reboot -p` is the portable spelling and the one that works on One UI;
+ * `svc power shutdown` is a fallback for builds that refuse it.
+ *
+ * There is no adb path back from this. With the tablet off there is no adbd
+ * listening, so nothing here or anywhere else can turn it back on - someone
+ * has to walk over and hold the power button.
+ */
+async function powerOffDevice(serial) {
+  const first = await run(['reboot', '-p'], { serial });
+  if (first.ok || deviceWentDown(first)) return { ok: true, via: 'adb reboot -p', stderr: '' };
+
+  const second = await shell('svc power shutdown', { serial });
+  return {
+    ok: second.ok || deviceWentDown(second),
+    via: 'svc power shutdown',
+    stderr: second.stderr || first.stderr,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Installing and launching
 // ---------------------------------------------------------------------------
 
@@ -799,6 +841,8 @@ module.exports = {
   getMediaVolume,
   setMediaVolume,
   trimCaches,
+  rebootDevice,
+  powerOffDevice,
   installApk,
   uninstallPackage,
   launchApp,

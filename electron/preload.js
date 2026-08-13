@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld('bench', {
   openPlay: (serial, pkg) => ipcRenderer.invoke('play:open', serial, pkg),
   launchApp: (serial, pkg) => ipcRenderer.invoke('app:launch', serial, pkg),
 
+  /** Both prompt for confirmation in the main process before doing anything. */
+  rebootDevice: (serial) => ipcRenderer.invoke('device:reboot', serial),
+  powerOffDevice: (serial) => ipcRenderer.invoke('device:poweroff', serial),
+
   listWallpapers: () => ipcRenderer.invoke('wallpaper:list'),
   chooseWallpaper: () => ipcRenderer.invoke('wallpaper:choose'),
   setWallpaper: (serial, localPath) => ipcRenderer.invoke('wallpaper:set', serial, localPath),
