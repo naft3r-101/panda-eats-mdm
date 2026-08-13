@@ -26,6 +26,27 @@ const { app, dialog } = require('electron');
 function initAutoUpdate(getWindow = () => null) {
   if (!app.isPackaged) return;
 
+  /**
+   * The feed is a private repo, so the check needs a credential, and it is read
+   * from PANDA_BENCH_UPDATE_TOKEN rather than baked into the installer - a copy
+   * of the app on its own therefore grants nobody access to the repo.
+   *
+   * electron-updater looks for GH_TOKEN, but that is the same variable the gh
+   * CLI reads, and gh prefers it over its own keyring login. A machine-wide
+   * GH_TOKEN scoped read-only to this one repo would silently break every other
+   * gh command on the bench PC. So the token is carried in our own variable and
+   * copied onto GH_TOKEN inside this process only, where nothing else sees it.
+   *
+   * No token means no self-update: the check is skipped and the app is
+   * otherwise completely normal. Provisioning a tablet must never depend on it.
+   */
+  const token = process.env.PANDA_BENCH_UPDATE_TOKEN;
+  if (!token) {
+    console.log('[updater] PANDA_BENCH_UPDATE_TOKEN not set - skipping the update check.');
+    return;
+  }
+  process.env.GH_TOKEN = token;
+
   const { autoUpdater } = require('electron-updater');
 
   autoUpdater.autoDownload = true;
