@@ -47,7 +47,8 @@
         "provider": "github",
         "owner": "naft3r-101",
         "repo": "panda-eats-mdm",
-        "private": true
+        "private": true,
+        "releaseType": "release"
       }
     ]
   },
