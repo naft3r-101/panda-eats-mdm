@@ -36,6 +36,13 @@
       {
         "from": "profiles",
         "to": "profiles"
+      },
+      {
+        "from": "build",
+        "to": "wallpapers",
+        "filter": [
+          "wallpaper-*.png"
+        ]
       }
     ],
     "win": {
