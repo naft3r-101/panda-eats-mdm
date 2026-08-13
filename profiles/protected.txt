@@ -1,0 +1,110 @@
+# Hard guard list - these are NEVER disabled, even if a bloat profile names them.
+#
+# This list is the difference between a debloat tool and a brick. Disabling the
+# keyboard, the launcher, WebView, or the permission controller leaves a tablet
+# that boots to a black screen or cannot be typed into, and fixing that on a
+# device already sitting on a restaurant counter is a drive across town.
+#
+# On top of this static list, provision.js also protects, at runtime:
+#   - the device's current IME       (settings get secure default_input_method)
+#   - the device's current launcher  (cmd package resolve-activity HOME)
+#   - every com.pandaeats.* package
+# Those are resolved per device, because they differ between Samsung and Lenovo.
+
+
+# --- Core framework ---------------------------------------------------------
+android
+com.android.systemui
+com.android.settings
+com.android.settings.intelligence
+com.android.shell
+com.android.keychain
+com.android.location.fused
+com.android.externalstorage
+com.android.documentsui
+com.android.wifi.resources
+com.android.networkstack
+com.android.networkstack.permissionconfig
+com.android.cellbroadcastreceiver
+
+# --- Providers: disabling any of these takes the system down ----------------
+com.android.providers.settings
+com.android.providers.media
+com.android.providers.media.module
+com.android.providers.downloads
+com.android.providers.downloads.ui
+com.android.providers.contacts
+com.android.providers.telephony
+com.android.providers.userdictionary
+com.android.providers.blockednumber
+com.android.providers.calendar
+
+# --- Install / permission plumbing ------------------------------------------
+com.android.packageinstaller
+com.google.android.packageinstaller
+com.android.permissioncontroller
+com.google.android.permissioncontroller
+com.samsung.android.packageinstaller
+
+# --- WebView: the order app and every embedded view dies without it ---------
+com.android.webview
+com.google.android.webview
+com.samsung.android.webview
+
+# --- Google core services ----------------------------------------------------
+# GMS and GSF are what Supabase Realtime wake-ups and FCM ride on. Play Store is
+# how the order app updates. All three stay, by explicit decision.
+com.google.android.gms
+com.google.android.gsf
+com.google.android.gsf.login
+com.google.android.gms.location.history
+com.android.vending
+
+# --- Keyboards ---------------------------------------------------------------
+# The current IME is also protected dynamically, but list the usual suspects so
+# a profile edit cannot strand a device that has only one keyboard installed.
+com.google.android.inputmethod.latin
+com.samsung.android.honeyboard
+com.sec.android.inputmethod
+com.android.inputmethod.latin
+com.lenovo.ime
+
+# --- Launchers ---------------------------------------------------------------
+com.android.launcher
+com.android.launcher3
+com.sec.android.app.launcher
+com.google.android.apps.nexuslauncher
+com.lenovo.launcher
+com.zui.launcher
+
+# --- Crashes the device ------------------------------------------------------
+# The Google app / Assistant. This is NOT here to preserve a feature - it is
+# here because `pm disable-user` on it takes system_server down and the tablet
+# restarts itself. Verified on Tanya's SM-T510 (R52N10RAJ5D) on August 12, 2026:
+# adb returned "Failure calling service package: Broken pipe (32)" on this exact
+# package, and every command after it got "Can't find service: package".
+#
+# On One UI this package backs the launcher search widget and the assistant, and
+# pulling it out from under a live SystemUI takes the whole box with it. It was
+# an aggressive-tier entry in bloat/common.txt until then, so any run with
+# Aggressive on hit it and rebooted the tablet.
+#
+# If you ever want this off, do it from Settings on the device, not over adb.
+com.google.android.googlequicksearchbox
+
+# --- Browser: kept on purpose. Tablets stay general-purpose. ----------------
+com.android.chrome
+com.sec.android.app.sbrowser
+
+# --- Telephony / connectivity ------------------------------------------------
+com.android.phone
+com.android.server.telecom
+com.android.bluetooth
+com.android.nfc
+com.android.certinstaller
+com.android.captiveportallogin
+
+# --- Ours --------------------------------------------------------------------
+com.pandaeats.ordertaking
+com.pandaeats.ordertaking.staging
+com.pandaeats.ordertaking.dev

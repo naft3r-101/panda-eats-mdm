@@ -1,0 +1,44 @@
+# Lenovo / ZUI bloat - the TB-X606F (Tab M10 FHD Plus) profile.
+#
+# This is the bench reference device, not a fleet device. Matched on
+# ro.product.manufacturer = lenovo.
+#
+# "!" prefix = aggressive tier. Packages not present are skipped silently.
+#
+# This list is thinner than the Samsung one and is expected to be incomplete -
+# use the Discover tab against a real TB-X606F to find the rest, then paste the
+# packages you recognise as junk into this file.
+
+
+# --- Lenovo's own store and account plumbing --------------------------------
+com.lenovo.leos.appstore
+com.lenovo.leos.appstore.pad
+com.lenovo.lsf
+com.lenovo.lsf.user
+com.lenovo.payment
+com.lenovo.ecommerce
+
+# --- Assistant / telemetry / "helpful" background services -------------------
+com.tblenovo.center
+com.tblenovo.lenovotips
+com.tblenovo.feedback
+com.lenovo.lps.cloud.sync.row
+com.lenovo.lps.push
+com.lenovo.dcmonitor
+
+# --- Preinstalled partner junk ----------------------------------------------
+com.lenovo.anyshare.gps
+com.ucturbo
+com.pandasuite.viewer
+
+# --- Gaming / kids ----------------------------------------------------------
+com.zui.game
+com.tblenovo.kidsmode
+
+# --- Aggressive tier ---------------------------------------------------------
+!com.lenovo.browser
+!com.zui.gallery
+!com.zui.filemanager
+!com.zui.music
+!com.zui.deskclock
+!com.tblenovo.soundrecorder

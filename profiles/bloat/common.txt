@@ -1,0 +1,63 @@
+# Bloat candidates present on most Android builds regardless of OEM.
+#
+# Format:  one package per line.
+#          a leading "!" marks the entry as AGGRESSIVE tier - skipped unless the
+#          Aggressive toggle is on.
+#
+# Nothing here is uninstalled. Everything is `pm disable-user --user 0`, which is
+# reversible with `pm enable` and survives nothing worse than a reboot. Packages
+# that are not present on the device are skipped silently, so an over-broad list
+# is safe - the Audit view shows you exactly which ones were actually found
+# before anything is touched.
+#
+# Deliberately NOT here, per the "tablet stays general-purpose" decision:
+# Chrome, Play Store, Gmail, Files, Calculator, Clock, Camera, Settings.
+
+
+# --- Google apps nobody opens on a counter tablet ---------------------------
+com.google.android.apps.tachyon
+com.google.android.videos
+com.google.android.music
+com.google.android.apps.youtube.music
+com.google.android.play.games
+com.google.android.apps.magazines
+com.google.android.apps.books
+com.google.ar.core
+com.google.ar.lens
+com.google.android.apps.wellbeing
+com.google.android.projection.gearhead
+com.google.android.apps.subscriptions.red
+com.google.android.apps.googleassistant
+
+# --- Printing / casting we do not use ---------------------------------------
+# Receipts print over ESC/POS to a thermal printer on the LAN, not through the
+# Android print framework.
+com.google.android.printservice.recommendation
+com.android.bips
+
+# --- Accessibility / TTS extras ---------------------------------------------
+# NOTE: com.google.android.tts is left alone. The order app speaks the "open the
+# app" reminder (#746) through the system TTS engine.
+com.google.android.marvin.talkback
+
+# --- Aggressive tier ---------------------------------------------------------
+# Real background hogs, but each one costs the tablet a feature someone might
+# actually want. Off unless you turn Aggressive on.
+
+# NOT LISTED: com.google.android.googlequicksearchbox (the Google app /
+# Assistant). It used to be the first entry in this tier. Disabling it crashes
+# system_server on the SM-T510 and the tablet restarts itself. It is in
+# protected.txt now - read the note there before putting it back.
+
+# Photos, Drive, Docs, Maps, Gmail. Useful on a general tablet, dead weight on a
+# counter one.
+!com.google.android.apps.photos
+!com.google.android.apps.docs
+!com.google.android.apps.maps
+!com.google.android.gm
+!com.google.android.calendar
+!com.google.android.contacts
+!com.google.android.apps.messaging
+!com.google.android.deskclock
+!com.google.android.keep
+!com.google.android.youtube

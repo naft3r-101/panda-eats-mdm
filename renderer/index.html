@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: file:;" />
+    <title>Panda Bench</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <!-- ---------------------------------------------------------------- -->
+      <!-- Sidebar: connected devices                                        -->
+      <!-- ---------------------------------------------------------------- -->
+      <aside class="sidebar">
+        <header class="brand">
+          <img class="brand-mark" src="brand-64.png" alt="" aria-hidden="true" />
+          <div>
+            <h1>Panda Bench</h1>
+            <p>Tablet provisioning</p>
+          </div>
+        </header>
+
+        <div class="sidebar-section">
+          <div class="sidebar-heading">
+            <h2>Devices</h2>
+            <button class="ghost-btn" id="refresh" type="button">Refresh</button>
+          </div>
+          <div class="devices" id="devices" role="radiogroup" aria-label="Connected devices"></div>
+        </div>
+
+        <footer class="adb-status">
+          <div class="adb-line">
+            <span class="adb-dot" id="adbDot" aria-hidden="true"></span>
+            <span id="adbPath">Looking for adb...</span>
+          </div>
+          <div class="adb-actions">
+            <button class="ghost-btn" id="locateAdb" type="button">Locate adb</button>
+            <button class="ghost-btn" id="openProfiles" type="button">Profiles</button>
+          </div>
+        </footer>
+      </aside>
+
+      <!-- ---------------------------------------------------------------- -->
+      <!-- Main                                                              -->
+      <!-- ---------------------------------------------------------------- -->
+      <main class="main">
+        <div class="topbar">
+          <div class="device-title">
+            <h2 id="deviceTitle">No tablet selected</h2>
+            <p id="deviceSubtitle">Plug a tablet in over USB and accept the debugging prompt on its screen.</p>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Sections">
+            <button class="tab" role="tab" id="tab-audit" aria-controls="panel-audit" aria-selected="true" type="button">Audit</button>
+            <button class="tab" role="tab" id="tab-install" aria-controls="panel-install" aria-selected="false" tabindex="-1" type="button">Setup</button>
+            <button class="tab" role="tab" id="tab-provision" aria-controls="panel-provision" aria-selected="false" tabindex="-1" type="button">Provision</button>
+            <button class="tab" role="tab" id="tab-discover" aria-controls="panel-discover" aria-selected="false" tabindex="-1" type="button">Discover</button>
+            <button class="tab" role="tab" id="tab-rollback" aria-controls="panel-rollback" aria-selected="false" tabindex="-1" type="button">Rollback</button>
+          </div>
+        </div>
+
+        <!-- Audit --------------------------------------------------------- -->
+        <section class="panel" id="panel-audit" role="tabpanel" aria-labelledby="tab-audit">
+          <div class="panel-actions">
+            <button class="primary-btn" id="runAudit" type="button" disabled>Run audit</button>
+            <span class="hint">Read-only. Touches nothing on the tablet.</span>
+          </div>
+          <div id="auditBody" class="panel-body">
+            <p class="empty">Select a tablet, then run an audit to see what is drifted.</p>
+          </div>
+        </section>
+
+        <!-- Install ------------------------------------------------------- -->
+        <section class="panel" id="panel-install" role="tabpanel" aria-labelledby="tab-install" hidden>
+          <div id="installedApps"></div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>From Google Play</h3>
+              <span class="count">the production path</span>
+            </div>
+            <p class="card-note">
+              The order app ships through Play. This opens its listing on the tablet's own screen so you
+              just tap Install there, then come back and run Provision. There is no way to drive a Play
+              install remotely, because it needs a Google account signed in on the device.
+            </p>
+            <div class="card-foot">
+              <button class="primary-btn" id="openPlay" type="button" disabled>Open Play listing on tablet</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>From an APK file</h3>
+              <span class="count" id="aapt2Status">looking for aapt2...</span>
+            </div>
+            <div class="rows" id="apkCandidates">
+              <div class="row"><span class="row-key">Scanning for APKs...</span></div>
+            </div>
+            <div class="card-foot">
+              <button class="ghost-btn" id="chooseApk" type="button">Choose an APK...</button>
+              <button class="ghost-btn" id="rescanApks" type="button">Rescan</button>
+            </div>
+          </div>
+
+          <div id="installSelected"></div>
+
+          <div class="options" id="installOptions">
+            <button class="switch" role="switch" aria-checked="true" data-iopt="grantPermissions" type="button">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-text">
+                <strong>Grant permissions up front</strong>
+                <small>Pre-approve runtime permissions so nobody has to tap through dialogs on the counter.</small>
+              </span>
+            </button>
+            <button class="switch" role="switch" aria-checked="true" data-iopt="tune" type="button">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-text">
+                <strong>Tune background survival after installing</strong>
+                <small>Doze exemption, standby bucket active, background ops allowed. Without this Android will eventually put the order listener to sleep.</small>
+              </span>
+            </button>
+            <button class="switch" role="switch" aria-checked="true" data-iopt="launch" type="button">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-text">
+                <strong>Launch it when done</strong>
+                <small>Opens the app on the tablet so you can pair it straight away.</small>
+              </span>
+            </button>
+          </div>
+
+          <div class="panel-actions">
+            <button class="primary-btn" id="runInstall" type="button" disabled>Install</button>
+            <button class="ghost-btn" id="launchAppBtn" type="button" disabled>Launch on tablet</button>
+            <button class="ghost-btn" id="clearInstallLog" type="button">Clear log</button>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Wallpaper</h3>
+              <span class="count">needs one tap on the tablet</span>
+            </div>
+            <div id="wallpaperBlocked"></div>
+            <div class="wallpapers" id="wallpapers"></div>
+            <p class="card-note">
+              Android gives adb no way to set the wallpaper outright, so this copies the image to the
+              tablet and opens its "Set as" chooser with the picture already loaded. Tap Set as wallpaper,
+              then pick Home screen.
+            </p>
+            <div class="card-foot">
+              <button class="primary-btn" id="setWallpaper" type="button" disabled>Send to tablet</button>
+              <button class="ghost-btn" id="chooseWallpaper" type="button">Use my own image...</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>System update</h3>
+              <span class="count" id="patchStatus">-</span>
+            </div>
+            <p class="card-note">
+              Firmware updates are signed and vendor-driven, so they cannot be applied over adb. This opens
+              the update screen on the tablet so you can tap Download and install without hunting through
+              Settings.
+            </p>
+            <div class="card-foot">
+              <button class="primary-btn" id="openUpdate" type="button" disabled>Open update screen on tablet</button>
+            </div>
+          </div>
+
+          <div class="log" id="installLog" role="log" aria-live="polite" aria-label="Install log">
+            <p class="empty">Nothing run yet.</p>
+          </div>
+        </section>
+
+        <!-- Provision ----------------------------------------------------- -->
+        <section class="panel" id="panel-provision" role="tabpanel" aria-labelledby="tab-provision" hidden>
+          <div class="options" id="options">
+            <button class="switch" role="switch" aria-checked="false" data-opt="aggressive" type="button">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-text">
+                <strong>Aggressive tier</strong>
+                <small>Also disable Photos, Drive, Maps, the Google app, Galaxy Store and similar. Bigger speed win, fewer features left.</small>
+              </span>
+            </button>
+            <button class="switch" role="switch" aria-checked="false" data-opt="skipSettings" type="button">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-text">
+                <strong>Skip settings</strong>
+                <small>Leave animations, timeouts and battery managers exactly as they are.</small>
+              </span>
+            </button>
+            <button class="switch" role="switch" aria-checked="false" data-opt="skipBloat" type="button">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-text">
+                <strong>Skip debloat</strong>
+                <small>Do not disable any packages on this run.</small>
+              </span>
+            </button>
+            <button class="switch" role="switch" aria-checked="false" data-opt="skipAppTuning" type="button">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-text">
+                <strong>Skip order-app tuning</strong>
+                <small>Do not touch the doze exemption, standby bucket or background permissions.</small>
+              </span>
+            </button>
+          </div>
+
+          <div id="plan" class="plan-host">
+            <p class="empty">Select a tablet to see exactly what would change.</p>
+          </div>
+
+          <div class="panel-actions">
+            <button class="primary-btn" id="runApply" type="button" disabled>Apply to tablet</button>
+            <button class="ghost-btn" id="refreshPlan" type="button" disabled>Re-read tablet</button>
+            <button class="ghost-btn" id="clearLog" type="button">Clear log</button>
+            <span class="hint">A rollback point is saved before anything changes. Apply re-reads the tablet first, so this preview cannot go stale.</span>
+          </div>
+
+          <div class="log" id="log" role="log" aria-live="polite" aria-label="Provisioning log">
+            <p class="empty">Nothing run yet.</p>
+          </div>
+        </section>
+
+        <!-- Discover ------------------------------------------------------ -->
+        <section class="panel" id="panel-discover" role="tabpanel" aria-labelledby="tab-discover" hidden>
+          <div class="panel-actions">
+            <button class="primary-btn" id="runDiscover" type="button" disabled>Scan for unknown packages</button>
+            <button class="primary-btn danger" id="disableSelected" type="button" disabled>Disable selected</button>
+            <span class="hint">Tick anything you want gone on THIS tablet. A rollback point is saved, so Revert undoes it.</span>
+          </div>
+          <div id="discoverBody" class="panel-body">
+            <p class="empty">Run a scan to see what this tablet ships that the profiles do not cover.</p>
+          </div>
+          <div class="log" id="discoverLog" role="log" aria-live="polite" aria-label="Disable log">
+            <p class="empty">Nothing run yet.</p>
+          </div>
+        </section>
+
+        <!-- Rollback ------------------------------------------------------ -->
+        <section class="panel" id="panel-rollback" role="tabpanel" aria-labelledby="tab-rollback" hidden>
+          <div class="panel-actions">
+            <button class="primary-btn" id="loadBackups" type="button" disabled>Refresh rollback points</button>
+            <button class="ghost-btn" id="openState" type="button">Open folder</button>
+            <span class="hint">Each Apply writes one. Reverting restores settings, re-enables packages, and undoes app tuning.</span>
+          </div>
+          <div id="rollbackBody" class="panel-body">
+            <p class="empty">No rollback points loaded.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

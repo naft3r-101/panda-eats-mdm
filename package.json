@@ -1,0 +1,57 @@
+{
+  "name": "panda-bench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Panda Bench - tablet provisioning workbench for Panda Eats order-taking tablets. Audits, debloats, and tunes an Android tablet over adb. No root, no factory reset, fully reversible.",
+  "main": "electron/main.js",
+  "author": "Rene Ruiz <reneruiz@getpandaeats.com>",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder --win --x64",
+    "release": "electron-builder --win --x64 --publish always"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "electron-builder": "^26.0.12"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "electron-builder",
+      "app-builder-bin"
+    ]
+  },
+  "build": {
+    "appId": "com.pandaeats.bench",
+    "productName": "Panda Bench",
+    "files": [
+      "electron/**",
+      "renderer/**",
+      "profiles/**",
+      "build/icon.ico",
+      "node_modules/**"
+    ],
+    "extraResources": [
+      {
+        "from": "profiles",
+        "to": "profiles"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "naft3r-101",
+        "repo": "panda-eats-mdm",
+        "private": true
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

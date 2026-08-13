@@ -1,0 +1,90 @@
+# Panda Eats tablet settings profile
+#
+# Format:  <scope> <key> <value>   # comment
+# Scopes:  global | system | secure
+#
+# Every value here is read before it is written, and the previous value is saved
+# to state/<serial>-<timestamp>.json so Revert can put it back exactly.
+# Keys that do not exist on a given device are harmless - Android's settings
+# provider just stores them and nothing reads them.
+
+
+# ---------------------------------------------------------------------------
+# Speed
+# ---------------------------------------------------------------------------
+# Window and transition scales are handled entirely by the system compositor,
+# so 0 is free and safe.
+global window_animation_scale 0
+global transition_animation_scale 0
+
+# animator_duration_scale is NOT set to 0 on purpose. Jetpack Compose reads this
+# value through MotionDurationScale, and at 0 every withFrameNanos animation
+# completes instantly - which makes indeterminate spinners (the order app's
+# loading states) look frozen rather than fast. 0.5 is still a large perceived
+# win with none of that risk.
+global animator_duration_scale 0.5
+
+
+# ---------------------------------------------------------------------------
+# Always-on counter tablet
+# ---------------------------------------------------------------------------
+# 7 = AC | USB | wireless. The screen never sleeps while the tablet is plugged
+# in, which is how these live on a restaurant counter.
+global stay_on_while_plugged_in 7
+
+# 30 minutes, for the case where someone unplugs it.
+system screen_off_timeout 1800000
+
+# No screensaver / daydream taking over the display.
+secure screensaver_enabled 0
+secure screensaver_activate_on_dock 0
+secure screensaver_activate_on_sleep 0
+
+
+# ---------------------------------------------------------------------------
+# Orders must be heard
+# ---------------------------------------------------------------------------
+# Do Not Disturb off. Media volume is set separately by the app (it needs the
+# device's real max, which varies) - see provision.js.
+global zen_mode 0
+global heads_up_notifications_enabled 1
+
+
+# ---------------------------------------------------------------------------
+# Background survival
+# ---------------------------------------------------------------------------
+# These are the OS-level battery managers that put the order listener to sleep.
+# The per-app exemptions (doze whitelist, appops, standby bucket) are applied
+# separately against whichever com.pandaeats.ordertaking* packages are installed.
+global adaptive_battery_management_enabled 0
+global app_standby_enabled 0
+global low_power 0
+
+# Samsung One UI specific. Absent on other OEMs, harmless there.
+global app_auto_restriction_enabled false
+global automatic_power_save_mode 0
+global adaptive_fast_charging 1
+
+
+# ---------------------------------------------------------------------------
+# Network
+# ---------------------------------------------------------------------------
+# Scan throttling delays reconnect after a router blip, which is the most common
+# way a tablet goes quiet without anyone noticing.
+global wifi_scan_throttle_enabled 0
+
+# Deprecated on newer Android but still honoured on the SM-T510's vintage:
+# 2 = never turn wifi off while asleep.
+global wifi_sleep_policy 2
+
+# Stop the captive-portal walled-garden popups that can steal foreground from
+# the order app.
+global captive_portal_detection_enabled 0
+
+# NOT SET: network_recommendations_enabled.
+# Android 12+ made it system-controlled. `settings put` accepts it, exits 0, and
+# the value stays put - verified on an SM-T227U running Android 14. Leaving it
+# in the profile meant every audit reported one permanent phantom drift and
+# every Apply logged a green check for a write that never landed. Apply now
+# reads every setting back after writing it, so if this happens again with some
+# other key you will see a warning rather than a lie.

@@ -1,0 +1,7 @@
+node_modules/
+
+# Rollback points are per-tablet device state, not source.
+state/
+
+# electron-builder output
+dist/

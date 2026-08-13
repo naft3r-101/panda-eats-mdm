@@ -1,0 +1,110 @@
+# Samsung / One UI bloat - the SM-T510 (Galaxy Tab A 10.1) profile.
+#
+# This is the fleet device: Tanya's tablet is an SM-T510, serial R52N10RAJ5D.
+# Matched on ro.product.manufacturer = samsung.
+#
+# "!" prefix = aggressive tier, skipped unless the Aggressive toggle is on.
+# Packages not present on the device are skipped silently.
+
+
+# --- Bixby. Six packages, all of them resident. -----------------------------
+com.samsung.android.bixby.agent
+com.samsung.android.bixby.agent.dummy
+com.samsung.android.bixby.wakeup
+com.samsung.android.bixbyvision.framework
+com.samsung.android.app.settings.bixby
+com.samsung.systemui.bixby2
+com.samsung.android.visionintelligence
+
+# --- Samsung Free / Daily: the left-of-home news feed ------------------------
+com.samsung.android.app.spage
+
+# --- Customization Service. Profiles your usage continuously; pure overhead
+#     on a tablet that runs one app.
+com.samsung.android.rubin.app
+
+# --- Preinstalled partner junk ----------------------------------------------
+com.facebook.appmanager
+com.facebook.services
+com.facebook.system
+com.facebook.katana
+com.microsoft.skydrive
+com.microsoft.office.officehubrow
+com.linkedin.android
+com.netflix.partner.activation
+com.netflix.mediaclient
+com.spotify.music
+
+# --- Gaming stack ------------------------------------------------------------
+com.samsung.android.game.gamehome
+com.samsung.android.game.gametools
+com.samsung.android.game.gos
+
+# --- Kids mode ---------------------------------------------------------------
+com.samsung.android.kidsinstaller
+com.sec.android.app.kidshome
+
+# --- AR Emoji / stickers -----------------------------------------------------
+com.samsung.android.arzone
+com.samsung.android.aremoji
+com.sec.android.mimage.avatarstickers
+com.samsung.android.stickercenter
+com.samsung.android.service.aircommand
+
+# --- Wearable / companion stubs for hardware this tablet will never see -----
+com.samsung.android.mateagent
+com.samsung.android.app.watchmanagerstub
+com.samsung.android.wearable.dummy
+com.samsung.android.beaconmanager
+com.samsung.android.easysetup
+com.samsung.android.smartmirroring
+com.samsung.android.mdx
+com.samsung.android.mdx.quickboard
+com.samsung.android.mdx.kit
+
+# --- Migration tooling, only ever used once on day one ----------------------
+com.samsung.android.smartswitchassistant
+com.sec.android.easyMover.Agent
+
+# --- Tips, feedback, telemetry ----------------------------------------------
+com.samsung.android.app.tips
+com.samsung.android.app.updatecenter
+com.samsung.android.dqagent
+com.samsung.android.bbc.bbcagent
+com.samsung.android.rlc
+com.sec.android.diagmonagent
+com.samsung.android.forest
+com.samsung.android.scpm
+com.sec.android.app.chromecustomizations
+
+# --- Themes ------------------------------------------------------------------
+com.samsung.android.themestore
+com.samsung.android.wallpaper.livewallpaper
+
+# NOT LISTED: com.samsung.android.themecenter.
+# Samsung marks it a protected package. `pm disable-user` throws
+# SecurityException "Cannot disable a protected package" and exits 255 - there
+# is no adb path to turning it off, verified on an SM-T227U running One UI on
+# Android 14. Leaving it in the list meant every audit showed one package that
+# could never be cleared. If you hit another one of these, Apply now names it
+# explicitly in the log so you know to delete the line rather than retry.
+
+# --- Aggressive tier ---------------------------------------------------------
+# Galaxy Store. Play Store is the install path for the order app, so this is
+# redundant, but it is still an app store and the decision was to leave those
+# reachable. Off by default.
+!com.sec.android.app.samsungapps
+
+# Samsung Cloud + account sync. Disabling stops background sync entirely.
+!com.samsung.android.scloud
+!com.samsung.android.allshare.service.fileshare
+!com.samsung.android.allshare.service.mediashare
+
+# Samsung's own stock apps. Fine to keep if anyone uses the tablet as a tablet.
+!com.samsung.android.app.notes
+!com.samsung.android.email.provider
+!com.samsung.android.calendar
+!com.sec.android.gallery3d
+!com.sec.android.app.myfiles
+!com.samsung.android.messaging
+!com.sec.android.app.voicenote
