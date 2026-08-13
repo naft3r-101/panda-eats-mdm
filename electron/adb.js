@@ -459,23 +459,55 @@ async function getStorage(serial) {
  * Play cannot install or update anything, so every future version of the order
  * app has to arrive over a USB cable. Worth knowing BEFORE the tablet leaves
  * the bench rather than three months later when it is silently out of date.
+ *
+ * `dumpsys account` is the obvious source and is useless on One UI: it prints
+ * an add/remove audit history and the list of registered AUTHENTICATORS, but
+ * never the accounts themselves. Verified on an SM-T510 running Android 11,
+ * where it reported "no Google account" on a tablet that had one signed in -
+ * the worst kind of wrong answer, because it is the reassuring one.
+ *
+ * `dumpsys content` (the sync manager) does list them, one header line per
+ * real account in its Sync Status section:
+ *
+ *     Sync Status
+ *     Account someone@gmail.com u0 com.google
+ *     Account Meet u0 com.google.android.apps.tachyon
+ *
+ * Note the second line: Meet/Duo registers an account of its own, so the
+ * "Accounts: N" total in the same dump is NOT the number of Google accounts.
+ * Only an entry whose type is exactly com.google means Play has something to
+ * work with.
  */
 async function getAccounts(serial) {
-  const text = await shellOut('dumpsys account', { serial });
+  const content = await shellOut('dumpsys content', { serial });
 
-  // "Accounts: N" is the count of accounts actually signed in.
-  const countMatch = text.match(/Accounts:\s*(\d+)/);
-  const count = countMatch ? Number(countMatch[1]) : null;
+  // Anchored to the start of the line so the SyncAdapterType and ServiceInfo
+  // registrations further down the dump - which also carry type=com.google on
+  // a device with no account at all - cannot be mistaken for a real account.
+  let types = [...content.matchAll(/^Account\s+(.+?)\s+u(\d+)\s+([\w.]+)\s*$/gm)].map((m) => m[3]);
 
-  // Only "Account {name=..., type=...}" blocks are real accounts. A bare
-  // `type=` scan also picks up every registered AUTHENTICATOR on the device -
-  // com.google is always present as an authenticator even when nobody is
-  // signed in, which made this report a Google account on a tablet with none.
-  const types = [...text.matchAll(/Account\s*\{[^}]*?type=([\w.]+)/g)].map((m) => m[1]);
+  const totalMatch = content.match(/^Accounts:\s*(\d+)/m);
+  let count = totalMatch ? Number(totalMatch[1]) : null;
+
+  // Fallback for platforms whose sync manager dump is shaped differently but
+  // whose `dumpsys account` does emit real "Account {name=..., type=...}"
+  // blocks. Only consulted when the primary source found nothing, so the
+  // common case stays at one adb round trip.
+  if (types.length === 0) {
+    const legacy = await shellOut('dumpsys account', { serial });
+    types = [...legacy.matchAll(/Account\s*\{[^}]*?type=([\w.]+)/g)].map((m) => m[1]);
+    if (count == null) {
+      const legacyCount = legacy.match(/Accounts:\s*(\d+)/);
+      if (legacyCount) count = Number(legacyCount[1]);
+    }
+  }
+
+  const googleCount = types.filter((t) => t === 'com.google').length;
 
   return {
-    count,
-    hasGoogle: count !== 0 && types.includes('com.google'),
+    count: count == null ? types.length || null : count,
+    googleCount,
+    hasGoogle: googleCount > 0,
     types: [...new Set(types)],
   };
 }

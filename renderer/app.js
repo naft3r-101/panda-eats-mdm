@@ -502,7 +502,7 @@ function renderAudit(report) {
           'Google account',
           device.accounts
             ? device.accounts.hasGoogle
-              ? `signed in (${device.accounts.count})`
+              ? `signed in (${device.accounts.googleCount || device.accounts.count})`
               : 'none'
             : 'unknown'
         )}
