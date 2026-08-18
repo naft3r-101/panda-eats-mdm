@@ -449,6 +449,10 @@ function renderAudit(report) {
   const ram = device.memory.total == null ? '-' : `${formatBytes(device.memory.available)} free of ${formatBytes(device.memory.total)}`;
   const disk = device.storage.total == null ? '-' : `${formatBytes(device.storage.available)} free of ${formatBytes(device.storage.total)}`;
   const volume = device.mediaVolume.current == null ? '-' : `${device.mediaVolume.current} of ${device.mediaVolume.max}`;
+  const brightness =
+    device.brightness.current == null
+      ? '-'
+      : `${device.brightness.current} of ${device.brightness.max} (${Math.round((device.brightness.current / device.brightness.max) * 100)}%)`;
 
   // Another MDM owning the device outranks everything this tool does, so it is
   // the first thing on the page rather than a footnote.
@@ -497,6 +501,7 @@ function renderAudit(report) {
         ${cell('Memory', ram)}
         ${cell('Storage', disk)}
         ${cell('Media volume', volume)}
+        ${cell('Screen brightness', brightness)}
         ${cell('Packages', `${device.packageCount} installed, ${device.disabledCount} disabled`)}
         ${cell('Keyboard', device.ime || 'unknown')}
         ${cell('Launcher', device.launcher || 'unknown')}

@@ -19,6 +19,7 @@ on a tablet that is already in the field, including one that is already paired t
 | **Debloat** | `pm disable-user --user 0` on Bixby, Samsung Free, Facebook stubs, Game Launcher, AR Emoji, Lenovo's store, and ~60 more per OEM |
 | **Always-on** | Screen never sleeps while plugged in, 30 minute timeout when unplugged, no screensaver |
 | **Audible** | Do Not Disturb off, media volume pinned to the device maximum |
+| **Readable** | Adaptive brightness off, screen brightness held at 80% of the tablet's own maximum or higher |
 | **Background survival** | Order app added to the doze whitelist, standby bucket forced to `active`, background app-ops allowed, adaptive battery and app standby turned off |
 | **Network** | Wi-Fi scan throttling off, Wi-Fi stays up while asleep, captive-portal nagging off |
 
@@ -159,7 +160,7 @@ leaves a working revert. The Rollback tab lists them per tablet. Reverting:
 - puts every setting back to the exact value it held (or unsets it, if it was unset)
 - re-enables every package that run disabled
 - restores the doze exemption, standby bucket, and app-ops to what they were
-- restores the previous media volume
+- restores the previous media volume and screen brightness
 
 Rollback points live in `state/` during development, and in the app's userData folder once
 packaged. The **Open folder** button on the Rollback tab takes you there.
