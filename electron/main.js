@@ -107,6 +107,8 @@ handle('audit:run', async (event, serial, opts) => provision.audit(serial, opts 
 
 handle('plan:run', async (event, serial, opts) => provision.preview(serial, opts || {}));
 
+handle('drift:check', async (event, serial) => provision.driftCheck(serial));
+
 handle('apply:run', async (event, serial, opts) =>
   provision.apply(serial, opts || {}, (progress) => {
     if (!event.sender.isDestroyed()) event.sender.send('progress', progress);

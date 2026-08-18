@@ -114,6 +114,24 @@ button {
   margin-top: 1px;
 }
 
+/* The counter-readiness warning under the device name. Amber, not red: the
+   tablet is fine, it just needs an Apply before it goes back on a counter. */
+.drift-chip {
+  display: inline-block;
+  margin-top: 7px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--amber);
+  background: var(--amber-bg);
+  border: 1px solid rgb(217 119 6 / 0.22);
+}
+
+.drift-chip[hidden] {
+  display: none;
+}
+
 .brand-version {
   color: var(--zinc-500);
   font-variant-numeric: tabular-nums;

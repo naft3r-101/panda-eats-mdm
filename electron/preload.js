@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('bench', {
   /** Audit + the exact plan Apply would execute, in one round trip. */
   preview: (serial, opts) => ipcRenderer.invoke('plan:run', serial, opts),
   apply: (serial, opts) => ipcRenderer.invoke('apply:run', serial, opts),
+  /** The three-read counter-readiness check, run on every connect. */
+  driftCheck: (serial) => ipcRenderer.invoke('drift:check', serial),
   revert: (serial, file) => ipcRenderer.invoke('revert:run', serial, file),
   discover: (serial) => ipcRenderer.invoke('discover:run', serial),
   disablePackages: (serial, packages) => ipcRenderer.invoke('packages:disable', serial, packages),

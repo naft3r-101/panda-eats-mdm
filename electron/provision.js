@@ -326,12 +326,71 @@ function buildPlan(report, opts = {}) {
     : report.bloat.filter((b) => !b.disabled && !b.protected).map((b) => b.pkg);
   const apps = opts.skipAppTuning ? [] : report.app.filter((a) => !a.dozeExempt || !a.bucketOk || !a.opsOk);
 
+  /**
+   * The two levels Apply enforces outside the settings profile, because both
+   * are FLOORS rather than exact matches and so cannot be profile lines.
+   *
+   * They are in the plan because Apply refuses to run on an empty one: a
+   * tablet whose only fault was a screen someone had dimmed offered "Nothing
+   * to apply" and no way to fix it from the UI, while the audit called the
+   * same tablet not ready. Deliberately not gated by the skip switches - those
+   * name settings, packages and the order app, and Apply has always set these
+   * two regardless.
+   */
+  const levels = [];
+  if (!report.brightnessOk) {
+    const b = report.device.brightness;
+    levels.push({
+      what: 'Screen brightness',
+      current: b.current == null ? 'unreadable' : `${b.current} of ${b.max}`,
+      desired: `${brightnessFloorFor(b)} of ${b.max}`,
+    });
+  }
+  if (!report.volumeOk) {
+    const v = report.device.mediaVolume;
+    levels.push({
+      what: 'Media volume',
+      current: `${v.current} of ${v.max}`,
+      desired: `${v.max} of ${v.max}`,
+    });
+  }
+
   return {
     settings,
     packages,
     apps,
+    levels,
     blocked: report.blocked,
-    total: settings.length + packages.length + apps.length,
+    total: settings.length + packages.length + apps.length + levels.length,
+  };
+}
+
+/**
+ * The cheap counter-readiness read, for the moment a tablet is plugged in.
+ *
+ * Three reads rather than [audit]'s full sweep, because this runs on every
+ * connect: the levels that drift on their own between visits, and whether
+ * adaptive brightness has been switched back on behind them. A tablet that has
+ * sat on a counter for a month is the case this exists for - it comes back
+ * dimmed, and nobody would think to run an audit on a tablet that was already
+ * provisioned.
+ */
+async function driftCheck(serial) {
+  const [brightness, mediaVolume, mode] = await Promise.all([
+    adb.getBrightness(serial),
+    adb.getMediaVolume(serial),
+    adb.getSetting(serial, 'system', 'screen_brightness_mode'),
+  ]);
+  const floor = brightnessFloorFor(brightness);
+  return {
+    brightness,
+    mediaVolume,
+    percent: brightness.current == null || !brightness.max
+      ? null
+      : Math.round((brightness.current / brightness.max) * 100),
+    adaptiveOn: mode != null && Number(mode) === 1,
+    brightnessOk: brightness.current == null || floor == null || brightness.current >= floor,
+    volumeOk: mediaVolume.current == null || mediaVolume.max == null || mediaVolume.current >= mediaVolume.max,
   };
 }
 
@@ -1052,6 +1111,7 @@ async function disableSelected(serial, packages, onProgress = () => {}) {
 
 module.exports = {
   audit,
+  driftCheck,
   disableSelected,
   preview,
   buildPlan,
