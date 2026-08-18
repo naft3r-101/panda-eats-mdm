@@ -114,6 +114,11 @@ button {
   margin-top: 1px;
 }
 
+.brand-version {
+  color: var(--zinc-500);
+  font-variant-numeric: tabular-nums;
+}
+
 .sidebar-section {
   flex: 1 1 auto;
   min-height: 0;

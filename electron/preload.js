@@ -8,6 +8,8 @@ const { contextBridge, ipcRenderer } = require('electron');
  * commands, only call the ones listed here.
  */
 contextBridge.exposeInMainWorld('bench', {
+  appVersion: () => ipcRenderer.invoke('app:version'),
+
   adbInfo: () => ipcRenderer.invoke('adb:info'),
   locateAdb: () => ipcRenderer.invoke('adb:locate'),
 

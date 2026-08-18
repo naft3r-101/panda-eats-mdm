@@ -1167,6 +1167,15 @@ $('locateAdb').addEventListener('click', async () => {
 // Boot
 // --------------------------------------------------------------------------
 
+/** The running build, in the sidebar - so a bench PC can be checked against a release. */
+async function showAppVersion() {
+  try {
+    $('appVersion').textContent = `v${await call(window.bench.appVersion)}`;
+  } catch {
+    // Not worth an error state on screen: the label just stays empty.
+  }
+}
+
 async function showAdbStatus() {
   try {
     const info = await call(window.bench.adbInfo);
@@ -1178,6 +1187,7 @@ async function showAdbStatus() {
   }
 }
 
+showAppVersion();
 showAdbStatus();
 refreshDevices();
 setInterval(refreshDevices, 4000);
