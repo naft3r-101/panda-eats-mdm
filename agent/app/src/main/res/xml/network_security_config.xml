@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Prod/staging talk HTTPS only (the platform default at targetSdk 28+ blocks cleartext).
+     The dev flavor points at http://10.0.2.2:3000, so cleartext is permitted for the
+     emulator host alias and localhost only. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

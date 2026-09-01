@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Platform Material theme so no extra Material-Components dependency is pulled in;
+         Compose draws the actual UI. NoActionBar because the single screen owns its chrome. -->
+    <style name="Theme.PandaBench" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>

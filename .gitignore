@@ -5,3 +5,9 @@ state/
 
 # electron-builder output
 dist/
+
+# Built APKs parked here by hand. NOT an input: `electron/apk.js` finds tablet
+# builds by walking the order app's own `app/build/outputs/apk`, never this
+# folder - so these are regenerable artifacts, and two 36 MB debug builds would
+# sit in git history forever for nothing.
+apk/
