@@ -216,10 +216,42 @@ function selectDevice(serial) {
   renderDevices();
   setBusy(state.busy);
   loadBackups().catch(() => {});
+  showDrift(serial);
 
   // If the operator is already looking at Provision, fill it in immediately.
   const onProvision = $('tab-provision').getAttribute('aria-selected') === 'true';
   if (onProvision) refreshPlan();
+}
+
+/**
+ * The counter-readiness check, run whenever a tablet is selected - which
+ * includes the moment one is plugged in, because refreshDevices() selects the
+ * first usable device on its own.
+ *
+ * Deliberately not the audit: three adb reads, so plugging a tablet in stays
+ * instant. It exists for the tablet that comes back from a counter already
+ * provisioned, where nobody would think to run an audit at all.
+ */
+async function showDrift(serial) {
+  const chipEl = $('driftChip');
+  chipEl.hidden = true;
+  try {
+    const drift = await call(window.bench.driftCheck, serial);
+    // The operator may have clicked another tablet while this was reading.
+    if (state.selected !== serial) return;
+
+    const problems = [];
+    if (!drift.brightnessOk) problems.push(`screen at ${drift.percent}%`);
+    if (drift.adaptiveOn) problems.push('adaptive brightness on');
+    if (!drift.volumeOk) problems.push(`media volume ${drift.mediaVolume.current} of ${drift.mediaVolume.max}`);
+    if (problems.length === 0) return;
+
+    chipEl.textContent = `Not counter-ready: ${problems.join(', ')}. Apply fixes it.`;
+    chipEl.hidden = false;
+  } catch {
+    // A tablet that cannot answer three reads has a bigger problem than a dim
+    // screen, and the device list and adb footer already say so.
+  }
 }
 
 async function refreshDevices() {
@@ -396,6 +428,12 @@ function renderPlan(planState) {
 
   const packageRow = (pkg) => `<div class="row"><span class="row-key">${esc(pkg)}</span>${chip('disable', 'warn')}</div>`;
 
+  const levelRow = (l) => `
+    <div class="row">
+      <span class="row-key">${esc(l.what)}</span>
+      <span class="row-val">${esc(l.current)} &rarr; <strong>${esc(l.desired)}</strong></span>
+    </div>`;
+
   const appRow = (a) => {
     const missing = [];
     if (!a.dozeExempt) missing.push('doze exemption');
@@ -412,6 +450,7 @@ function renderPlan(planState) {
       </div>
       <div class="card-body">
         ${section('Settings to change', plan.settings, settingRow, 20)}
+        ${section('Levels to set', plan.levels || [], levelRow)}
         ${section('Packages to disable', plan.packages, packageRow)}
         ${section('Order app fixes', plan.apps, appRow)}
       </div>
@@ -449,6 +488,10 @@ function renderAudit(report) {
   const ram = device.memory.total == null ? '-' : `${formatBytes(device.memory.available)} free of ${formatBytes(device.memory.total)}`;
   const disk = device.storage.total == null ? '-' : `${formatBytes(device.storage.available)} free of ${formatBytes(device.storage.total)}`;
   const volume = device.mediaVolume.current == null ? '-' : `${device.mediaVolume.current} of ${device.mediaVolume.max}`;
+  const brightness =
+    device.brightness.current == null
+      ? '-'
+      : `${device.brightness.current} of ${device.brightness.max} (${Math.round((device.brightness.current / device.brightness.max) * 100)}%)`;
 
   // Another MDM owning the device outranks everything this tool does, so it is
   // the first thing on the page rather than a footnote.
@@ -497,6 +540,7 @@ function renderAudit(report) {
         ${cell('Memory', ram)}
         ${cell('Storage', disk)}
         ${cell('Media volume', volume)}
+        ${cell('Screen brightness', brightness)}
         ${cell('Packages', `${device.packageCount} installed, ${device.disabledCount} disabled`)}
         ${cell('Keyboard', device.ime || 'unknown')}
         ${cell('Launcher', device.launcher || 'unknown')}
@@ -637,6 +681,7 @@ $('runApply').addEventListener('click', async () => {
   // Re-read the tablet so the plan and the audit both show the result rather
   // than what was true before the run.
   await refreshPlan();
+  await showDrift(state.selected);
 });
 
 // --------------------------------------------------------------------------
@@ -1162,6 +1207,15 @@ $('locateAdb').addEventListener('click', async () => {
 // Boot
 // --------------------------------------------------------------------------
 
+/** The running build, in the sidebar - so a bench PC can be checked against a release. */
+async function showAppVersion() {
+  try {
+    $('appVersion').textContent = `v${await call(window.bench.appVersion)}`;
+  } catch {
+    // Not worth an error state on screen: the label just stays empty.
+  }
+}
+
 async function showAdbStatus() {
   try {
     const info = await call(window.bench.adbInfo);
@@ -1173,6 +1227,7 @@ async function showAdbStatus() {
   }
 }
 
+showAppVersion();
 showAdbStatus();
 refreshDevices();
 setInterval(refreshDevices, 4000);

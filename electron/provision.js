@@ -28,6 +28,22 @@ const PANDA_PREFIX = 'com.pandaeats.';
 const APP_OPS = ['RUN_IN_BACKGROUND', 'RUN_ANY_IN_BACKGROUND'];
 
 /**
+ * Counter tablets get read from across a counter, usually with the room lights
+ * up, so brightness is held at a floor rather than pinned to a value: a tablet
+ * the restaurant has already turned up brighter than this is left alone.
+ */
+const BRIGHTNESS_FLOOR = 0.8;
+
+/**
+ * The lowest acceptable brightness on this device's own scale, or null when
+ * that scale could not be read.
+ */
+function brightnessFloorFor(brightness) {
+  if (!brightness || brightness.max == null) return null;
+  return Math.ceil(brightness.max * BRIGHTNESS_FLOOR);
+}
+
+/**
  * The framework package. Listed by `pm list packages` on every Android device
  * there is, so its absence means the read failed - not that the device is
  * unusually bare.
@@ -140,13 +156,14 @@ async function audit(serial, opts = {}) {
   const props = await adb.getProps(serial);
   const manufacturer = props['ro.product.manufacturer'] || '';
 
-  const [battery, memory, storage, uptime, mediaVolume, installed, disabled, doze, accounts] =
+  const [battery, memory, storage, uptime, mediaVolume, brightness, installed, disabled, doze, accounts] =
     await Promise.all([
       adb.getBattery(serial),
       adb.getMemory(serial),
       adb.getStorage(serial),
       adb.getUptimeSeconds(serial),
       adb.getMediaVolume(serial),
+      adb.getBrightness(serial),
       adb.listPackages(serial),
       adb.listDisabledPackages(serial),
       adb.getDozeWhitelist(serial),
@@ -181,6 +198,7 @@ async function audit(serial, opts = {}) {
     storage,
     uptime,
     mediaVolume,
+    brightness,
     accounts,
     management,
     ime,
@@ -254,6 +272,10 @@ async function audit(serial, opts = {}) {
   const volumeOk =
     mediaVolume.current == null || volumeTarget == null || mediaVolume.current >= volumeTarget;
 
+  const brightnessTarget = brightnessFloorFor(brightness);
+  const brightnessOk =
+    brightness.current == null || brightnessTarget == null || brightness.current >= brightnessTarget;
+
   return {
     device,
     settings,
@@ -263,6 +285,7 @@ async function audit(serial, opts = {}) {
     profileSources: lists.sources,
     blocked: bloat.filter((b) => b.protected).map((b) => b.pkg),
     volumeOk,
+    brightnessOk,
     summary: {
       settingsDrift,
       settingsTotal: settings.length,
@@ -270,7 +293,7 @@ async function audit(serial, opts = {}) {
       bloatPresent: bloat.length,
       appIssues,
       appPackages: app.length,
-      clean: settingsDrift === 0 && toDisable === 0 && appIssues === 0 && volumeOk,
+      clean: settingsDrift === 0 && toDisable === 0 && appIssues === 0 && volumeOk && brightnessOk,
     },
   };
 }
@@ -303,12 +326,71 @@ function buildPlan(report, opts = {}) {
     : report.bloat.filter((b) => !b.disabled && !b.protected).map((b) => b.pkg);
   const apps = opts.skipAppTuning ? [] : report.app.filter((a) => !a.dozeExempt || !a.bucketOk || !a.opsOk);
 
+  /**
+   * The two levels Apply enforces outside the settings profile, because both
+   * are FLOORS rather than exact matches and so cannot be profile lines.
+   *
+   * They are in the plan because Apply refuses to run on an empty one: a
+   * tablet whose only fault was a screen someone had dimmed offered "Nothing
+   * to apply" and no way to fix it from the UI, while the audit called the
+   * same tablet not ready. Deliberately not gated by the skip switches - those
+   * name settings, packages and the order app, and Apply has always set these
+   * two regardless.
+   */
+  const levels = [];
+  if (!report.brightnessOk) {
+    const b = report.device.brightness;
+    levels.push({
+      what: 'Screen brightness',
+      current: b.current == null ? 'unreadable' : `${b.current} of ${b.max}`,
+      desired: `${brightnessFloorFor(b)} of ${b.max}`,
+    });
+  }
+  if (!report.volumeOk) {
+    const v = report.device.mediaVolume;
+    levels.push({
+      what: 'Media volume',
+      current: `${v.current} of ${v.max}`,
+      desired: `${v.max} of ${v.max}`,
+    });
+  }
+
   return {
     settings,
     packages,
     apps,
+    levels,
     blocked: report.blocked,
-    total: settings.length + packages.length + apps.length,
+    total: settings.length + packages.length + apps.length + levels.length,
+  };
+}
+
+/**
+ * The cheap counter-readiness read, for the moment a tablet is plugged in.
+ *
+ * Three reads rather than [audit]'s full sweep, because this runs on every
+ * connect: the levels that drift on their own between visits, and whether
+ * adaptive brightness has been switched back on behind them. A tablet that has
+ * sat on a counter for a month is the case this exists for - it comes back
+ * dimmed, and nobody would think to run an audit on a tablet that was already
+ * provisioned.
+ */
+async function driftCheck(serial) {
+  const [brightness, mediaVolume, mode] = await Promise.all([
+    adb.getBrightness(serial),
+    adb.getMediaVolume(serial),
+    adb.getSetting(serial, 'system', 'screen_brightness_mode'),
+  ]);
+  const floor = brightnessFloorFor(brightness);
+  return {
+    brightness,
+    mediaVolume,
+    percent: brightness.current == null || !brightness.max
+      ? null
+      : Math.round((brightness.current / brightness.max) * 100),
+    adaptiveOn: mode != null && Number(mode) === 1,
+    brightnessOk: brightness.current == null || floor == null || brightness.current >= floor,
+    volumeOk: mediaVolume.current == null || mediaVolume.max == null || mediaVolume.current >= mediaVolume.max,
   };
 }
 
@@ -399,6 +481,7 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
       previousOps: a.ops,
     })),
     mediaVolume: report.device.mediaVolume,
+    brightness: report.device.brightness,
     results: null,
   };
 
@@ -540,6 +623,27 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
     log(r.ok ? 'ok' : 'warn', `Media volume set to max (${vol.max})`);
   }
 
+  // --- screen brightness: it has to be readable from across the counter ---
+  // A floor, not a pin: a tablet the restaurant turned up past it is left
+  // alone. The write is read back because adaptive brightness can drive the
+  // panel straight back down, which is why screen_brightness_mode is in the
+  // settings profile applied above rather than left to chance here.
+  const bright = report.device.brightness;
+  const floor = brightnessFloorFor(bright);
+  if (floor != null && bright.current != null && bright.current >= floor) {
+    log('ok', `Screen brightness already at ${Math.round((bright.current / bright.max) * 100)}% (${bright.current} of ${bright.max})`);
+  } else if (floor != null) {
+    const r = await adb.setBrightness(serial, floor);
+    bailIfDown(r, 'setting screen brightness');
+    const readBack = await adb.getSetting(serial, 'system', 'screen_brightness');
+    const stuck = valuesEqual(readBack, floor);
+    results.misc.push({ step: 'screen brightness', ok: r.ok && stuck });
+    if (!r.ok) log('error', `Screen brightness - adb refused: ${r.stderr || 'unknown error'}`);
+    else if (!stuck) {
+      log('warn', `Screen brightness did not stick, still ${readBack == null ? 'unset' : readBack} of ${bright.max}. Something on the tablet is driving the panel.`);
+    } else log('ok', `Screen brightness set to ${floor} of ${bright.max} (${Math.round(BRIGHTNESS_FLOOR * 100)}%)`);
+  }
+
   // --- free up cache ---
   const trim = await adb.trimCaches(serial);
   results.misc.push({ step: 'trim caches', ok: trim.ok });
@@ -624,6 +728,11 @@ async function revert(serial, file, onProgress = () => {}) {
   if (backup.mediaVolume && backup.mediaVolume.current != null) {
     await adb.setMediaVolume(serial, backup.mediaVolume.current);
     log('ok', `Media volume restored to ${backup.mediaVolume.current}`);
+  }
+
+  if (backup.brightness && backup.brightness.current != null) {
+    await adb.setBrightness(serial, backup.brightness.current);
+    log('ok', `Screen brightness restored to ${backup.brightness.current}`);
   }
 
   log('done', 'Revert complete. Reboot the tablet.');
@@ -950,6 +1059,7 @@ async function disableSelected(serial, packages, onProgress = () => {}) {
     packages: targets.map((pkg) => ({ pkg, wasDisabled: false })),
     appTuning: [],
     mediaVolume: null,
+    brightness: null,
     results: null,
   };
   const file = backupPath(serial);
@@ -1001,6 +1111,7 @@ async function disableSelected(serial, packages, onProgress = () => {}) {
 
 module.exports = {
   audit,
+  driftCheck,
   disableSelected,
   preview,
   buildPlan,

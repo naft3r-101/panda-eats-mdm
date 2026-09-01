@@ -1,6 +1,6 @@
 {
   "name": "panda-bench",
-  "version": "0.3.3",
+  "version": "0.3.6",
   "private": true,
   "description": "Panda Bench - tablet provisioning workbench for Panda Eats order-taking tablets. Audits, debloats, and tunes an Android tablet over adb. No root, no factory reset, fully reversible.",
   "main": "electron/main.js",

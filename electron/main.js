@@ -75,6 +75,13 @@ function handle(channel, fn) {
   });
 }
 
+/**
+ * The app's own version, for the sidebar. Deliberately its own channel rather
+ * than a field on adb:info: the version is true whether or not adb was found,
+ * and that handler's failure path would otherwise take the label with it.
+ */
+handle('app:version', async () => app.getVersion());
+
 handle('adb:info', async () => ({
   path: adb.resolveAdb(),
   found: fs.existsSync(adb.resolveAdb()),
@@ -99,6 +106,8 @@ handle('devices:list', async () => adb.listDevices());
 handle('audit:run', async (event, serial, opts) => provision.audit(serial, opts || {}));
 
 handle('plan:run', async (event, serial, opts) => provision.preview(serial, opts || {}));
+
+handle('drift:check', async (event, serial) => provision.driftCheck(serial));
 
 handle('apply:run', async (event, serial, opts) =>
   provision.apply(serial, opts || {}, (progress) => {

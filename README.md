@@ -19,6 +19,7 @@ on a tablet that is already in the field, including one that is already paired t
 | **Debloat** | `pm disable-user --user 0` on Bixby, Samsung Free, Facebook stubs, Game Launcher, AR Emoji, Lenovo's store, and ~60 more per OEM |
 | **Always-on** | Screen never sleeps while plugged in, 30 minute timeout when unplugged, no screensaver |
 | **Audible** | Do Not Disturb off, media volume pinned to the device maximum |
+| **Readable** | Adaptive brightness off, no pre-sleep dim, no battery-saver brightness limiter, screen held at 80% of the tablet's own maximum or higher |
 | **Background survival** | Order app added to the doze whitelist, standby bucket forced to `active`, background app-ops allowed, adaptive battery and app standby turned off |
 | **Network** | Wi-Fi scan throttling off, Wi-Fi stays up while asleep, captive-portal nagging off |
 
@@ -151,6 +152,25 @@ uses it for anything else.
 The audit tells you how many packages the aggressive tier is holding back, so you can see what
 you would gain before turning it on.
 
+### Drift, and what happens when a tablet comes back
+
+Brightness and media volume are **floors**, not profile lines: Apply raises a tablet that is under
+them and leaves one the restaurant turned up higher alone. That is also why they cannot be enforced
+the way a setting is - an exact-match profile would drag a bright tablet back down.
+
+The consequence is that a tablet which has been on a counter for a month comes back dimmed, and
+nobody would think to run an audit on a tablet that was already provisioned. So selecting a tablet
+runs a three-read check on the spot - brightness, adaptive brightness, media volume - and says so
+under the device name:
+
+```
+Not counter-ready: screen at 11%, adaptive brightness on. Apply fixes it.
+```
+
+Both levels are in the Provision plan as **Levels to set**, so Apply runs on a tablet whose only
+fault is a dimmed screen. Before that they were applied but never planned, and the button did
+nothing on a tablet the audit had just called not ready.
+
 ### Rollback
 
 Every Apply writes a rollback point **before it touches the device**, so even a crash mid-run
@@ -159,7 +179,7 @@ leaves a working revert. The Rollback tab lists them per tablet. Reverting:
 - puts every setting back to the exact value it held (or unsets it, if it was unset)
 - re-enables every package that run disabled
 - restores the doze exemption, standby bucket, and app-ops to what they were
-- restores the previous media volume
+- restores the previous media volume and screen brightness
 
 Rollback points live in `state/` during development, and in the app's userData folder once
 packaged. The **Open folder** button on the Rollback tab takes you there.

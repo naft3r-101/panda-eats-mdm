@@ -593,6 +593,44 @@ async function setMediaVolume(serial, value) {
   return shell(`media volume --stream 3 --set ${value}`, { serial });
 }
 
+/**
+ * Screen brightness and the device's own maximum.
+ *
+ * `settings get system screen_brightness` is an int on a scale the OEM picks.
+ * 255 is the AOSP maximum and what Android 11+ syncs its internal float back
+ * to, but 1023 and 2047 devices exist, so the scale has to be read before a
+ * percentage means anything.
+ *
+ * There is no adb accessor for that maximum - it is a framework resource - so
+ * it gets scraped out of the display and power dumps, with 255 as the backstop
+ * when neither names it. Android 11+ prints those fields as 0..1 floats, which
+ * are a different scale entirely and would read as a maximum of 1, so anything
+ * that small is ignored rather than believed. A maximum below the value the
+ * device is already storing is wrong by definition, so it widens to fit.
+ */
+async function getBrightness(serial) {
+  const raw = await getSetting(serial, 'system', 'screen_brightness');
+  const current = raw != null && /^\d+$/.test(raw) ? Number(raw) : null;
+
+  let max = null;
+  for (const command of ['dumpsys display', 'dumpsys power']) {
+    const text = await shellOut(command, { serial });
+    const m = text.match(/(?:mScreenBrightnessSettingMaximum|mScreenBrightnessRangeMaximum)=(\d+)(?![\d.])/);
+    if (m && Number(m[1]) > 1) {
+      max = Number(m[1]);
+      break;
+    }
+  }
+  if (max == null) max = 255;
+  if (current != null && current > max) max = current;
+
+  return { current, max };
+}
+
+async function setBrightness(serial, value) {
+  return putSetting(serial, 'system', 'screen_brightness', value);
+}
+
 async function trimCaches(serial) {
   return shell('pm trim-caches 999G', { serial });
 }
@@ -840,6 +878,8 @@ module.exports = {
   getUptimeSeconds,
   getMediaVolume,
   setMediaVolume,
+  getBrightness,
+  setBrightness,
   trimCaches,
   rebootDevice,
   powerOffDevice,

@@ -40,6 +40,28 @@ secure screensaver_enabled 0
 secure screensaver_activate_on_dock 0
 secure screensaver_activate_on_sleep 0
 
+# Adaptive brightness off. An 80% brightness floor means nothing while the OS
+# is free to dim the panel again the moment the room lights change, and a
+# counter tablet that has dimmed itself is one nobody reads. The level itself
+# is set separately by the app (it needs the device's real maximum, which
+# varies) - see provision.js.
+system screen_brightness_mode 0
+
+# The pre-sleep fade. AOSP's Settings.System.DIM_SCREEN, present and ON on the
+# SM-T227U. It only bites on battery, since the screen never sleeps while the
+# tablet is plugged in - but a tablet somebody unplugged should stay readable
+# until it actually turns off rather than fading out first.
+system dim_screen 0
+
+# Samsung's battery-saver brightness limiter, read off an SM-T227U on Android
+# 14. Dormant while low_power is 0 below, and that is exactly why it is here:
+# it is what dims the panel the moment somebody turns Power saving on from the
+# quick panel, and it is a limiter rather than a level, so nothing else in this
+# profile covers it. The name is Samsung's and the behaviour is inferred from
+# it, not measured - Apply reads every write back, so a key the platform
+# refuses shows up as a warning rather than a silent lie.
+global sem_low_power_brightness_limit 0
+
 
 # ---------------------------------------------------------------------------
 # Orders must be heard
