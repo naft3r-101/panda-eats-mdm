@@ -30,13 +30,45 @@ const MAX_BUFFER = 64 * 1024 * 1024; // dumpsys package on a stock Samsung is mu
 
 let cachedAdbPath = null;
 
+/**
+ * The adb that ships inside the installer, which is the one Panda Bench wants
+ * to use: finding adb was the only part of setting up a bench PC that happened
+ * outside this app, and a pinned copy means every bench runs the same version
+ * rather than whatever Android Studio left behind. Packaged it sits in
+ * resources/, and running from source it sits in vendor/ - where the build
+ * script puts it - so both are tried.
+ *
+ * Returns the path whether or not it exists; callers check.
+ */
+function bundledAdbCandidates() {
+  const out = [];
+  if (process.resourcesPath) out.push(path.join(process.resourcesPath, 'platform-tools', 'adb.exe'));
+  out.push(path.join(__dirname, '..', 'vendor', 'platform-tools', 'adb.exe'));
+  return out;
+}
+
+/** The bundled adb, if this copy of Panda Bench actually carries one. */
+function bundledAdb() {
+  for (const candidate of bundledAdbCandidates()) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      // unreadable path, keep looking
+    }
+  }
+  return null;
+}
+
 /** Candidate adb locations, best guess first. */
 function adbCandidates() {
   const home = process.env.USERPROFILE || process.env.HOME || '';
   const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
   const out = [];
 
+  // An explicit override still wins - someone debugging a version difference
+  // has to be able to force the issue.
   if (process.env.PANDA_BENCH_ADB) out.push(process.env.PANDA_BENCH_ADB);
+  out.push(...bundledAdbCandidates());
   for (const root of [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT]) {
     if (root) out.push(path.join(root, 'platform-tools', 'adb.exe'));
   }
@@ -66,6 +98,19 @@ function resolveAdb() {
   }
   cachedAdbPath = 'adb'; // hope it is on PATH; run() will surface ENOENT clearly
   return cachedAdbPath;
+}
+
+/** The bundled adb's version, read from the file Google ships beside it. */
+function bundledAdbVersion() {
+  const exe = bundledAdb();
+  if (!exe) return null;
+  try {
+    const props = fs.readFileSync(path.join(path.dirname(exe), 'source.properties'), 'utf8');
+    const match = props.match(/Pkg\.Revision\s*=\s*(.+)/);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 function setAdbPath(p) {
@@ -421,15 +466,25 @@ async function getLauncherPackage(serial) {
 // Health readouts
 // ---------------------------------------------------------------------------
 
+/** BatteryManager.BATTERY_HEALTH_* as dumpsys prints them. */
+const BATTERY_HEALTH = { 1: 'unknown', 2: 'good', 3: 'overheat', 4: 'dead', 5: 'over voltage', 6: 'failure', 7: 'cold' };
+
 async function getBattery(serial) {
   const text = await shellOut('dumpsys battery', { serial });
   const level = text.match(/level:\s*(\d+)/);
   const acPowered = /AC powered:\s*true/.test(text);
   const usbPowered = /USB powered:\s*true/.test(text);
   const wirelessPowered = /Wireless powered:\s*true/.test(text);
+  // A tablet that lives on a charger is the one whose battery swells, so the
+  // health and temperature the kernel reports are worth a line on the Verify
+  // tab. Temperature is in tenths of a degree C.
+  const health = text.match(/health:\s*(\d+)/);
+  const temperature = text.match(/temperature:\s*(-?\d+)/);
   return {
     level: level ? Number(level[1]) : null,
     charging: acPowered || usbPowered || wirelessPowered,
+    health: health ? BATTERY_HEALTH[Number(health[1])] || health[1] : null,
+    temperatureC: temperature ? Number(temperature[1]) / 10 : null,
   };
 }
 
@@ -838,8 +893,239 @@ async function openPlayListing(serial, pkg) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Readiness - what the Verify tab reads after the reboot
+// ---------------------------------------------------------------------------
+
+/**
+ * Services of one EXACT package that are running right now.
+ *
+ * `dumpsys activity services <pkg>` prefix-matches exactly like `dumpsys
+ * package` does, so the .staging and .dev builds' services come back in the
+ * same dump. Each record's header names its package, and only a header whose
+ * package is an exact match is kept. `isForeground=` sits on a later line of
+ * the same record - a foreground service is the one Android will not kill.
+ *
+ * @returns {Array<{name:string, foreground:boolean}>}
+ */
+function parseRunningServices(text, pkg) {
+  const services = [];
+  let current = null;
+  for (const line of normalise(text).split('\n')) {
+    const header = line.match(/^\s*\* ServiceRecord\{[0-9a-f]+ u\d+ ([\w.]+)\/([\w.$]+)\}/);
+    if (header) {
+      current = null;
+      if (header[1] === pkg) {
+        const cls = header[2].startsWith('.') ? `${pkg}${header[2]}` : header[2];
+        current = { name: cls, foreground: false };
+        services.push(current);
+      }
+      continue;
+    }
+    if (current) {
+      const fg = line.match(/\bisForeground=(true|false)/);
+      if (fg) current.foreground = fg[1] === 'true';
+    }
+  }
+  return services;
+}
+
+async function getRunningServices(serial, pkg) {
+  return parseRunningServices(await shellOut(`dumpsys activity services ${pkg}`, { serial }), pkg);
+}
+
+/**
+ * Runtime permission grants for one EXACT package.
+ *
+ * Only the "runtime permissions:" section counts. The install permissions
+ * above it also print granted=true, and they are always true - reading them
+ * would report a denied notification permission as granted. A permission the
+ * dump does not list is one this build does not declare, or one that is not a
+ * runtime permission on this Android version; either way there is nothing to
+ * grant, so it is simply absent from the result.
+ *
+ * @returns {Object<string, boolean>|null} null when the package is not installed
+ */
+function parseRuntimePermissions(text, pkg) {
+  const lines = parsePackageBlocks(text).get(pkg);
+  if (!lines) return null;
+  const grants = {};
+  let inRuntime = false;
+  for (const line of lines) {
+    if (/^\s*runtime permissions:/.test(line)) {
+      inRuntime = true;
+      continue;
+    }
+    if (!inRuntime) continue;
+    const m = line.match(/^\s+([\w.]+): granted=(true|false)/);
+    if (m) grants[m[1]] = m[2] === 'true';
+    else if (line.trim() !== '') break;
+  }
+  return grants;
+}
+
+async function getRuntimePermissions(serial, pkg) {
+  return parseRuntimePermissions(await shellOut(`dumpsys package ${pkg}`, { serial }), pkg);
+}
+
+/** Grant a runtime permission the way `install -g` would have. Reversible with revokePermission. */
+async function grantPermission(serial, pkg, permission) {
+  return shell(`pm grant ${pkg} ${permission}`, { serial });
+}
+
+async function revokePermission(serial, pkg, permission) {
+  return shell(`pm revoke ${pkg} ${permission}`, { serial });
+}
+
+/**
+ * Lock screen state, from two reads.
+ *
+ * `locksettings get-disabled` says whether the lock screen shows at all.
+ * `dumpsys lock_settings` says whether a PIN, pattern or password is behind
+ * it (CredentialType: NONE | PIN | PATTERN | PASSWORD). A swipe-only lock
+ * screen can be turned off over adb; one with a credential needs that
+ * credential, so it is reported rather than touched. Both verified on an
+ * SM-T227U running Android 14.
+ */
+function parseLockScreen(disabledOut, dumpText) {
+  const d = String(disabledOut || '').trim().toLowerCase();
+  const disabled = d === 'true' ? true : d === 'false' ? false : null;
+  const m = String(dumpText || '').match(/CredentialType:\s*(\w+)/);
+  return { disabled, credentialType: m ? m[1].toUpperCase() : null };
+}
+
+async function getLockScreen(serial) {
+  const [disabledOut, dump] = await Promise.all([
+    shellOut('locksettings get-disabled', { serial }),
+    shellOut('dumpsys lock_settings', { serial }),
+  ]);
+  return parseLockScreen(disabledOut, dump);
+}
+
+async function setLockScreenDisabled(serial, disabled) {
+  return shell(`locksettings set-disabled ${disabled ? 'true' : 'false'}`, { serial });
+}
+
+/**
+ * Wi-Fi state. `cmd wifi status` (Android 11+) prints one line per fact;
+ * `dumpsys wifi` is the backstop for older builds, whose mWifiInfo line
+ * carries the same SSID/RSSI fields.
+ */
+function parseWifiStatus(text) {
+  const t = normalise(text);
+  const enabled = /^Wifi is enabled/m.test(t) ? true : /^Wifi is disabled/m.test(t) ? false : null;
+  const conn = t.match(/^Wifi is connected to "(.*?)"/m);
+  const ip = t.match(/\bIP: \/?(\d+\.\d+\.\d+\.\d+)/);
+  const rssi = t.match(/\bRSSI: (-?\d+)/);
+  return {
+    enabled,
+    connected: Boolean(conn),
+    ssid: conn ? conn[1] : null,
+    ip: ip ? ip[1] : null,
+    rssi: rssi ? Number(rssi[1]) : null,
+  };
+}
+
+function parseWifiDump(text) {
+  const t = normalise(text);
+  const info = t.match(/mWifiInfo[^\n]*/);
+  const line = info ? info[0] : '';
+  const ssid = line.match(/SSID: "?([^",]*)"?,/);
+  const rssi = line.match(/\bRSSI: (-?\d+)/);
+  const connected = /mNetworkInfo[^\n]*state: CONNECTED/.test(t) || /Supplicant state: COMPLETED/.test(line);
+  const enabled = /Wi-Fi is enabled|mWifiState=?\s*enabled|WifiState: ENABLED/i.test(t) ? true : null;
+  return {
+    enabled,
+    connected,
+    ssid: connected && ssid && ssid[1] && ssid[1] !== '<unknown ssid>' ? ssid[1] : null,
+    ip: null,
+    rssi: rssi ? Number(rssi[1]) : null,
+  };
+}
+
+async function getWifi(serial) {
+  const status = await shellOut('cmd wifi status', { serial });
+  if (/^Wifi is/m.test(status)) return parseWifiStatus(status);
+  return parseWifiDump(await shellOut('dumpsys wifi', { serial }));
+}
+
+/** The tablet's clock against this PC's, and its time zone. */
+async function getClock(serial) {
+  const [epochOut, tz] = await Promise.all([
+    shellOut('date +%s', { serial }),
+    shellOut('getprop persist.sys.timezone', { serial }),
+  ]);
+  const epoch = parseInt(epochOut.trim(), 10);
+  return {
+    epoch: Number.isFinite(epoch) ? epoch : null,
+    timezone: tz.trim() || null,
+    driftSeconds: Number.isFinite(epoch) ? Math.round(epoch - Date.now() / 1000) : null,
+  };
+}
+
+/** A hostname or IPv4 address. Anything else never reaches the shell. */
+const HOST_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252}[A-Za-z0-9])?$/;
+
+function parsePing(text) {
+  const t = normalise(text);
+  const time = t.match(/time=([\d.]+) ms/);
+  const received = /\bbytes from\b/.test(t) && !/\b0 received\b/.test(t);
+  return { ok: received, ms: time ? Number(time[1]) : null };
+}
+
+/**
+ * One ping FROM THE TABLET, because that is the network the orders arrive on.
+ * A host the PC can reach over Ethernet says nothing about a tablet on the
+ * restaurant's Wi-Fi.
+ */
+async function pingHost(serial, host) {
+  if (!HOST_PATTERN.test(String(host || ''))) return { ok: false, ms: null, error: 'not a valid host name or IP address' };
+  const r = await shell(`ping -c 1 -W 3 ${host}`, { serial, timeout: 15000 });
+  const parsed = parsePing(`${r.stdout}\n${r.stderr}`);
+  const lines = toLines(`${r.stdout}\n${r.stderr}`);
+  return { ok: r.ok && parsed.ok, ms: parsed.ms, output: lines[lines.length - 1] || '' };
+}
+
+/**
+ * Send a file on the tablet to a TCP port, FROM THE TABLET. Toybox ships `nc`
+ * on every Android build this tool has met, and a raw ESC/POS slip to port
+ * 9100 is exactly how the order app prints to a LAN printer, so this proves
+ * the tablet-to-printer path without touching the app.
+ */
+async function sendFileToPort(serial, host, port, deviceFile) {
+  if (!HOST_PATTERN.test(String(host || ''))) return { ok: false, error: 'not a valid host name or IP address' };
+  const p = Number(port);
+  if (!Number.isInteger(p) || p < 1 || p > 65535) return { ok: false, error: 'not a valid port' };
+  const r = await shell(`nc -w 5 ${host} ${p} < ${deviceFile}`, { serial, timeout: 20000 });
+  const output = `${r.stdout}\n${r.stderr}`.trim();
+  return { ok: r.ok && !/refused|unreachable|timed? ?out|No route|nc:/i.test(output), output };
+}
+
+/**
+ * Turn USB debugging off. adbd stops the moment the setting lands, so losing
+ * the connection is the success case here, exactly as it is for a reboot.
+ * Getting it back on means Settings > Developer options on the tablet itself.
+ */
+async function disableUsbDebugging(serial) {
+  const r = await putSetting(serial, 'global', 'adb_enabled', 0);
+  return { ok: r.ok || deviceWentDown(r), stderr: r.stderr };
+}
+
+/** File contents from the tablet, or null when it is not there. */
+async function readDeviceFile(serial, devicePath) {
+  const r = await shell(`cat ${devicePath}`, { serial });
+  if (!r.ok || /No such file|Permission denied|Is a directory/i.test(`${r.stdout}\n${r.stderr}`)) return null;
+  return r.stdout;
+}
+
+async function ensureDeviceDir(serial, devicePath) {
+  return shell(`mkdir -p ${devicePath}`, { serial });
+}
+
 module.exports = {
   resolveAdb,
+  bundledAdb,
+  bundledAdbVersion,
   setAdbPath,
   run,
   shell,
@@ -847,6 +1133,25 @@ module.exports = {
   toLines,
   normalise,
   deviceWentDown,
+  parseRunningServices,
+  getRunningServices,
+  parseRuntimePermissions,
+  getRuntimePermissions,
+  grantPermission,
+  revokePermission,
+  parseLockScreen,
+  getLockScreen,
+  setLockScreenDisabled,
+  parseWifiStatus,
+  parseWifiDump,
+  getWifi,
+  getClock,
+  parsePing,
+  pingHost,
+  sendFileToPort,
+  disableUsbDebugging,
+  readDeviceFile,
+  ensureDeviceDir,
   listDevices,
   getProps,
   getSetting,

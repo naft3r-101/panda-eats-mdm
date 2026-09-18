@@ -19,13 +19,94 @@
  */
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const adb = require('./adb');
 const apk = require('./apk');
+const play = require('./play');
 const profiles = require('./profiles');
 
 const PANDA_PREFIX = 'com.pandaeats.';
 const APP_OPS = ['RUN_IN_BACKGROUND', 'RUN_ANY_IN_BACKGROUND'];
+
+/**
+ * Runtime permissions the order app needs and cannot grant itself.
+ *
+ * `adb install -g` pre-grants these, but the production path is Google Play,
+ * which grants nothing: a Play-installed build starts with every runtime
+ * permission denied and relies on the app asking. On the bench SM-T227U the
+ * Play build sat with notifications denied and its notification importance at
+ * NONE - a tablet that could not have alerted anyone. `pm grant` is what
+ * `install -g` does under the hood, and `pm revoke` undoes it.
+ */
+const RUNTIME_PERMISSIONS = [
+  { permission: 'android.permission.POST_NOTIFICATIONS', label: 'notifications' },
+  { permission: 'android.permission.BLUETOOTH_CONNECT', label: 'Bluetooth' },
+];
+
+/** The order listener's foreground service, as the manifest names it. */
+const LISTENER_SERVICE = /\.service\.OrderListenerService$/;
+
+/** Where orders come from. Reachability is checked FROM the tablet. */
+const BACKEND_HOST = 'app.getpandaeats.com';
+
+/**
+ * The provisioning record on the tablet itself. Documents/ survives app
+ * uninstalls and is visible in the Files app, which is the point: a tablet
+ * that comes back from a counter says when it was provisioned and with what,
+ * without anyone having to find the bench PC it was done on.
+ */
+const RECORD_DIR = '/sdcard/Documents';
+const RECORD_PATH = `${RECORD_DIR}/panda-bench.json`;
+
+/**
+ * The steps Provision cannot do because each ends in a tap on the tablet, or
+ * needs something only the restaurant has. They used to live in the README,
+ * which is where nobody looks with a tablet on the desk. Ticks are kept per
+ * serial next to the rollback points and written into the tablet's record at
+ * Ship.
+ */
+const CHECKLIST = [
+  {
+    id: 'paired',
+    label: 'Order app paired to the restaurant',
+    note: 'Sign in with the tablet username and password from the merchant dashboard (Setup > Order Taking app).',
+  },
+  // NOT LISTED: the battery optimization dialog. Apply puts the app on the
+  // doze whitelist, which is exactly what that dialog grants, and the app
+  // skips the prompt when it is already exempt. Nothing for a human to do.
+  // NOT LISTED: Samsung's "Never sleeping apps". Apply's doze exemption is
+  // what Settings shows as battery usage "Unrestricted", and Samsung's
+  // sleeping-app pickers only offer apps that can be put to sleep - so PE
+  // Orders never appears in them and never needs to. On One UI 6.1 the
+  // Background usage limits menu is gone from the Battery page altogether.
+  // Verified on the SM-T227U on September 15, 2026.
+  {
+    id: 'wifi',
+    label: 'Joined the restaurant\'s own Wi-Fi, not a phone hotspot',
+    note: 'The tablet and the printer have to be on the same network, and a hotspot walks out of the door with its owner.',
+  },
+  {
+    id: 'printer',
+    label: 'Printer added in the order app and a test slip printed',
+    note: 'USB printers: tick "Always allow" on the permission prompt so it survives reboots.',
+  },
+  {
+    id: 'test-order',
+    label: 'A test order chimed on the tablet',
+    note: 'Place one from the widget. The chime is the whole point of the media volume floor.',
+  },
+  // NOT LISTED: Play auto-update. adb cannot read or set that toggle, and
+  // what actually matters - is the tablet on the build Play is serving - is
+  // now a Verify check against the production track.
+];
+
+/** Set by main from app.getVersion(); the engine has no Electron dependency. */
+let benchVersion = null;
+
+function setBenchVersion(version) {
+  benchVersion = version || null;
+}
 
 /**
  * Counter tablets get read from across a counter, usually with the room lights
@@ -156,7 +237,7 @@ async function audit(serial, opts = {}) {
   const props = await adb.getProps(serial);
   const manufacturer = props['ro.product.manufacturer'] || '';
 
-  const [battery, memory, storage, uptime, mediaVolume, brightness, installed, disabled, doze, accounts] =
+  const [battery, memory, storage, uptime, mediaVolume, brightness, installed, disabled, doze, accounts, lockScreen] =
     await Promise.all([
       adb.getBattery(serial),
       adb.getMemory(serial),
@@ -168,7 +249,15 @@ async function audit(serial, opts = {}) {
       adb.listDisabledPackages(serial),
       adb.getDozeWhitelist(serial),
       adb.getAccounts(serial),
+      adb.getLockScreen(serial),
     ]);
+
+  // A lock screen on a counter tablet hides the orders behind a swipe after
+  // every reboot. Swipe-only can be turned off over adb; a PIN, pattern or
+  // password cannot be removed without knowing it, so that is reported for a
+  // human rather than planned.
+  lockScreen.fixable = lockScreen.disabled === false && lockScreen.credentialType === 'NONE';
+  lockScreen.ok = lockScreen.disabled == null ? null : lockScreen.disabled;
 
   // Everything below plans from this list. If it is not trustworthy, nothing
   // downstream is either, so stop before the audit produces a confident answer
@@ -201,6 +290,7 @@ async function audit(serial, opts = {}) {
     brightness,
     accounts,
     management,
+    lockScreen,
     ime,
     launcher,
     packageCount: installed.size,
@@ -251,6 +341,7 @@ async function audit(serial, opts = {}) {
     for (const op of APP_OPS) {
       ops[op] = await adb.getAppOp(serial, pkg, op);
     }
+    const permissions = permissionState(await adb.getRuntimePermissions(serial, pkg));
     app.push({
       pkg,
       versionName: info.versionName,
@@ -261,12 +352,14 @@ async function audit(serial, opts = {}) {
       bucketOk: bucketIsGoodEnough(bucket),
       ops,
       opsOk: APP_OPS.every((op) => ops[op] === 'allow' || ops[op] === null),
+      permissions,
+      permissionsOk: permissionsOk(permissions),
     });
   }
 
   const settingsDrift = settings.filter((s) => !s.ok).length;
   const toDisable = bloat.filter((b) => !b.disabled && !b.protected).length;
-  const appIssues = app.filter((a) => !a.dozeExempt || !a.bucketOk || !a.opsOk).length;
+  const appIssues = app.filter((a) => appNeedsFix(a)).length;
 
   const volumeTarget = mediaVolume.max;
   const volumeOk =
@@ -286,6 +379,7 @@ async function audit(serial, opts = {}) {
     blocked: bloat.filter((b) => b.protected).map((b) => b.pkg),
     volumeOk,
     brightnessOk,
+    lockScreen,
     summary: {
       settingsDrift,
       settingsTotal: settings.length,
@@ -293,10 +387,29 @@ async function audit(serial, opts = {}) {
       bloatPresent: bloat.length,
       appIssues,
       appPackages: app.length,
-      clean: settingsDrift === 0 && toDisable === 0 && appIssues === 0 && volumeOk && brightnessOk,
+      clean:
+        settingsDrift === 0 && toDisable === 0 && appIssues === 0 && volumeOk && brightnessOk && !lockScreen.fixable,
     },
   };
 }
+
+/**
+ * The grant state of each permission in RUNTIME_PERMISSIONS: true, false, or
+ * null when this build or this Android does not have it as a runtime
+ * permission (nothing to grant, nothing wrong).
+ */
+function permissionState(grants) {
+  const out = {};
+  for (const { permission } of RUNTIME_PERMISSIONS) {
+    out[permission] = grants && permission in grants ? grants[permission] : null;
+  }
+  return out;
+}
+
+const permissionsOk = (permissions) => Object.values(permissions || {}).every((v) => v !== false);
+
+/** Anything Apply's per-app tuning would change. */
+const appNeedsFix = (a) => !a.dozeExempt || !a.bucketOk || !a.opsOk || !a.permissionsOk;
 
 function protectionReason(pkg, ime, launcher) {
   if (pkg === ime) return 'current keyboard';
@@ -324,7 +437,7 @@ function buildPlan(report, opts = {}) {
   const packages = opts.skipBloat
     ? []
     : report.bloat.filter((b) => !b.disabled && !b.protected).map((b) => b.pkg);
-  const apps = opts.skipAppTuning ? [] : report.app.filter((a) => !a.dozeExempt || !a.bucketOk || !a.opsOk);
+  const apps = opts.skipAppTuning ? [] : report.app.filter((a) => appNeedsFix(a));
 
   /**
    * The two levels Apply enforces outside the settings profile, because both
@@ -355,13 +468,21 @@ function buildPlan(report, opts = {}) {
     });
   }
 
+  // Swipe-only lock screen: reversible, unattended, and not gated by the skip
+  // switches for the same reason the levels are not. A PIN never lands here.
+  const lockScreen =
+    report.lockScreen && report.lockScreen.fixable
+      ? { what: 'Screen lock', current: 'swipe to unlock', desired: 'none' }
+      : null;
+
   return {
     settings,
     packages,
     apps,
     levels,
+    lockScreen,
     blocked: report.blocked,
-    total: settings.length + packages.length + apps.length + levels.length,
+    total: settings.length + packages.length + apps.length + levels.length + (lockScreen ? 1 : 0),
   };
 }
 
@@ -376,15 +497,20 @@ function buildPlan(report, opts = {}) {
  * provisioned.
  */
 async function driftCheck(serial) {
-  const [brightness, mediaVolume, mode] = await Promise.all([
+  const [brightness, mediaVolume, mode, recordText] = await Promise.all([
     adb.getBrightness(serial),
     adb.getMediaVolume(serial),
     adb.getSetting(serial, 'system', 'screen_brightness_mode'),
+    adb.readDeviceFile(serial, RECORD_PATH),
   ]);
   const floor = brightnessFloorFor(brightness);
   return {
     brightness,
     mediaVolume,
+    // The tablet's own account of when it was last provisioned, shown under
+    // the device name so "was this one ever done?" needs no audit.
+    record: parseRecord(recordText),
+    profile: profiles.fingerprint(),
     percent: brightness.current == null || !brightness.max
       ? null
       : Math.round((brightness.current / brightness.max) * 100),
@@ -482,6 +608,10 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
     })),
     mediaVolume: report.device.mediaVolume,
     brightness: report.device.brightness,
+    // Filled in as they land: a permission is only recorded once the tablet
+    // confirms the grant, and the lock screen only once it reads back as off.
+    permissions: [],
+    lockScreen: null,
     results: null,
   };
 
@@ -489,7 +619,7 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
   fs.writeFileSync(file, JSON.stringify(backup, null, 2), 'utf8');
   log('info', `Rollback point saved: ${path.basename(file)}`);
 
-  const results = { settings: [], packages: [], appTuning: [], misc: [], abortedAt: null };
+  const results = { settings: [], packages: [], appTuning: [], permissions: [], misc: [], abortedAt: null };
   const disabledOk = [];
 
   // Narrow the rollback record to what actually changed. It was written up
@@ -605,13 +735,31 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
     if (outcome.deviceDown) bail(`tuning ${a.pkg}`);
     if (outcome.ok) log('ok', `${a.pkg}: exempt from doze, standby bucket active, background ops allowed`);
     else log('warn', `${a.pkg}: could not set ${outcome.failed.join(', ')}`);
+
+    // Runtime permissions Play never granted. Read back like a setting: pm
+    // exits 0 for a permission the build does not declare, and the grant then
+    // simply does not appear.
+    for (const { permission, label } of RUNTIME_PERMISSIONS) {
+      if (!a.permissions || a.permissions[permission] !== false) continue;
+      const r = await adb.grantPermission(serial, a.pkg, permission);
+      bailIfDown(r, `granting ${label} permission to ${a.pkg}`);
+      const after = await adb.getRuntimePermissions(serial, a.pkg);
+      const stuck = Boolean(after && after[permission]);
+      results.permissions.push({ pkg: a.pkg, permission, ok: r.ok && stuck, error: stuck ? null : r.stderr || r.stdout });
+      if (stuck) {
+        backup.permissions.push({ pkg: a.pkg, permission });
+        log('ok', `${a.pkg}: ${label} permission granted`);
+      } else {
+        log('warn', `${a.pkg}: ${label} permission did not stick${r.stderr ? ` - ${r.stderr}` : ''}. Allow it by hand in Settings > Apps.`);
+      }
+    }
   }
   if (plannedApps.length === 0 && !opts.skipAppTuning) {
     log(
       report.app.length === 0 ? 'warn' : 'ok',
       report.app.length === 0
         ? 'The order app is not installed on this tablet - skipped background tuning.'
-        : 'Order app already exempt from doze, bucketed active, and allowed in background.'
+        : 'Order app already exempt from doze, bucketed active, allowed in background, and permitted to notify.'
     );
   }
 
@@ -644,6 +792,26 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
     } else log('ok', `Screen brightness set to ${floor} of ${bright.max} (${Math.round(BRIGHTNESS_FLOOR * 100)}%)`);
   }
 
+  // --- lock screen: orders must not hide behind a swipe after a reboot ---
+  if (plan.lockScreen) {
+    const r = await adb.setLockScreenDisabled(serial, true);
+    bailIfDown(r, 'turning off the lock screen');
+    const after = await adb.getLockScreen(serial);
+    const stuck = after.disabled === true;
+    results.misc.push({ step: 'lock screen', ok: r.ok && stuck });
+    if (stuck) {
+      backup.lockScreen = { disabledByRun: true };
+      log('ok', 'Lock screen turned off (was swipe to unlock)');
+    } else {
+      log('warn', `Lock screen did not turn off${r.stderr ? ` - ${r.stderr}` : ''}. Set it to None by hand in Settings > Lock screen.`);
+    }
+  } else if (report.lockScreen && report.lockScreen.credentialType && report.lockScreen.credentialType !== 'NONE') {
+    log(
+      'warn',
+      `A ${report.lockScreen.credentialType} lock is set. adb cannot remove it without the code - set Screen lock type to None by hand in Settings > Lock screen.`
+    );
+  }
+
   // --- free up cache ---
   const trim = await adb.trimCaches(serial);
   results.misc.push({ step: 'trim caches', ok: trim.ok });
@@ -651,7 +819,18 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
 
   persist();
 
-  log('done', 'Provisioning complete. Reboot the tablet to settle the changes.');
+  // --- leave a record on the tablet ---
+  const written = await writeRecord(serial, {
+    provisionedAt: new Date().toISOString(),
+    benchVersion,
+    profile: profiles.fingerprint(),
+    model: report.device.model,
+    manufacturer: report.device.manufacturer,
+    aggressive: !!opts.aggressive,
+  });
+  log(written.ok ? 'ok' : 'warn', written.ok ? `Provisioning record written to ${RECORD_PATH}` : 'Could not write the provisioning record to the tablet.');
+
+  log('done', 'Provisioning complete. Reboot the tablet to settle the changes, then check readiness on the Verify tab.');
   return { backupFile: file, results, planned: { settings: plannedSettings.length, packages: plannedBloat.length, apps: plannedApps.length } };
 }
 
@@ -723,6 +902,18 @@ async function revert(serial, file, onProgress = () => {}) {
       if (mode) await adb.setAppOp(serial, a.pkg, op, mode);
     }
     log('ok', `Restored background settings for ${a.pkg}`);
+  }
+
+  // Revoking a runtime permission stops the app's process, the same as
+  // denying it from Settings would.
+  for (const p of backup.permissions || []) {
+    const r = await adb.revokePermission(serial, p.pkg, p.permission);
+    log(r.ok ? 'ok' : 'warn', `Revoked ${p.permission.replace(/^android\.permission\./, '')} from ${p.pkg}`);
+  }
+
+  if (backup.lockScreen && backup.lockScreen.disabledByRun) {
+    const r = await adb.setLockScreenDisabled(serial, false);
+    log(r.ok ? 'ok' : 'warn', 'Lock screen turned back on (swipe to unlock)');
   }
 
   if (backup.mediaVolume && backup.mediaVolume.current != null) {
@@ -964,6 +1155,515 @@ async function openPlay(serial, pkg, onProgress = () => {}) {
 }
 
 // ---------------------------------------------------------------------------
+// The provisioning record on the tablet
+// ---------------------------------------------------------------------------
+
+function parseRecord(text) {
+  if (!text) return null;
+  try {
+    const record = JSON.parse(text);
+    return record && record.tool === 'panda-bench' ? record : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Merge `patch` into the tablet's record and push it back. Apply writes
+ * provisionedAt and the profile fingerprint; Ship adds shippedAt and the
+ * checklist. Each keeps what the other wrote.
+ */
+async function writeRecord(serial, patch) {
+  const existing = parseRecord(await adb.readDeviceFile(serial, RECORD_PATH)) || {};
+  const record = {
+    tool: 'panda-bench',
+    version: 1,
+    ...existing,
+    ...patch,
+    serial,
+    updatedAt: new Date().toISOString(),
+  };
+  const safeSerial = String(serial).replace(/[^\w.-]/g, '_');
+  const tmp = path.join(os.tmpdir(), `panda-bench-record-${safeSerial}.json`);
+  fs.writeFileSync(tmp, JSON.stringify(record, null, 2), 'utf8');
+  await adb.ensureDeviceDir(serial, RECORD_DIR);
+  const pushed = await adb.pushFile(serial, tmp, RECORD_PATH);
+  return { ok: pushed.ok, record };
+}
+
+// ---------------------------------------------------------------------------
+// Handover - the per-tablet checklist and printer address, kept on the PC
+// ---------------------------------------------------------------------------
+
+/**
+ * Lives in its own folder under state/ so listBackups(), which reads every
+ * .json in state/, cannot mistake it for a rollback point.
+ */
+function handoverPath(serial) {
+  const dir = path.join(ensureStateDir(), 'handover');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const safeSerial = String(serial).replace(/[^\w.-]/g, '_');
+  return path.join(dir, `${safeSerial}.json`);
+}
+
+function readHandover(serial) {
+  const file = handoverPath(serial);
+  let saved = {};
+  if (fs.existsSync(file)) {
+    try {
+      saved = JSON.parse(fs.readFileSync(file, 'utf8')) || {};
+    } catch {
+      saved = {};
+    }
+  }
+  return {
+    serial,
+    printerHost: typeof saved.printerHost === 'string' ? saved.printerHost : '',
+    checklist: saved.checklist && typeof saved.checklist === 'object' ? saved.checklist : {},
+    updatedAt: saved.updatedAt || null,
+    items: CHECKLIST,
+  };
+}
+
+function saveHandover(serial, patch = {}) {
+  const current = readHandover(serial);
+  const next = {
+    serial,
+    printerHost: typeof patch.printerHost === 'string' ? patch.printerHost.trim() : current.printerHost,
+    checklist: { ...current.checklist },
+    updatedAt: new Date().toISOString(),
+  };
+  for (const [id, done] of Object.entries(patch.checklist || {})) {
+    if (!CHECKLIST.some((item) => item.id === id)) continue;
+    next.checklist[id] = done ? { done: true, at: new Date().toISOString() } : { done: false, at: null };
+  }
+  fs.writeFileSync(handoverPath(serial), JSON.stringify(next, null, 2), 'utf8');
+  return readHandover(serial);
+}
+
+// ---------------------------------------------------------------------------
+// Verify - is this tablet actually able to serve?
+// ---------------------------------------------------------------------------
+
+/**
+ * Turn the readouts into the list the Verify tab shows. Pure, so it can be
+ * tested without a tablet.
+ *
+ * Each check is {id, label, status, detail, fix}. Status is ok, warn, bad or
+ * skip. Only `bad` blocks readiness. `fix` says where the fix lives: 'apply'
+ * (the Provision tab), 'manual' (the tablet's own screen), 'launch' (open the
+ * app), 'setup' (the Setup tab), or null.
+ */
+function readinessChecks(v) {
+  const checks = [];
+  const add = (id, label, status, detail, fix = null) => checks.push({ id, label, status, detail, fix });
+
+  const prod = v.prod;
+  if (!prod) {
+    add(
+      'app',
+      'Order app installed',
+      'bad',
+      v.apps.length
+        ? `Only ${v.apps.map((a) => a.pkg).join(', ')} - the production app is not installed.`
+        : 'Not installed. Install it from Google Play on the Setup tab.',
+      'setup'
+    );
+  } else {
+    const version = `v${prod.versionName || '?'} (${prod.versionCode || '?'})`;
+    add(
+      'app',
+      'Order app installed',
+      prod.enabled === false ? 'bad' : 'ok',
+      prod.enabled === false ? `${version}, but disabled` : version,
+      prod.enabled === false ? 'manual' : null
+    );
+
+    if (prod.listener && prod.listener.foreground) {
+      add('listener', 'Order listener running', 'ok', 'OrderListenerService is up as a foreground service.');
+    } else if (prod.listener) {
+      add('listener', 'Order listener running', 'warn', 'OrderListenerService is running but not in the foreground, so Android can kill it. Open the app and check again.', 'launch');
+    } else if (prod.running) {
+      add('listener', 'Order listener running', 'bad', 'The app is open but its order listener is not running. It starts once the app is paired.', 'launch');
+    } else {
+      add('listener', 'Order listener running', 'bad', 'The app is not running. Open it on the tablet, or reboot - it starts itself at boot.', 'launch');
+    }
+
+    const notif = prod.permissions['android.permission.POST_NOTIFICATIONS'];
+    add(
+      'notifications',
+      'Notifications allowed',
+      notif === false ? 'bad' : 'ok',
+      notif === false
+        ? 'Denied. The app cannot alert anyone about an order until this is granted.'
+        : notif === null
+          ? 'Not a runtime permission on this Android version.'
+          : 'Granted.',
+      notif === false ? 'apply' : null
+    );
+
+    const bt = prod.permissions['android.permission.BLUETOOTH_CONNECT'];
+    add(
+      'bluetooth',
+      'Bluetooth allowed',
+      bt === false ? 'warn' : 'ok',
+      bt === false
+        ? 'Denied. Only matters for a Bluetooth printer, but Apply grants it anyway.'
+        : bt === null
+          ? 'Not a runtime permission on this Android version.'
+          : 'Granted.',
+      bt === false ? 'apply' : null
+    );
+
+    const background = prod.dozeExempt && prod.bucketOk && prod.opsOk;
+    const missing = [];
+    if (!prod.dozeExempt) missing.push('not exempt from doze');
+    if (!prod.bucketOk) missing.push('standby bucket not active');
+    if (!prod.opsOk) missing.push('background ops limited');
+    add(
+      'background',
+      'Survives in the background',
+      background ? 'ok' : 'bad',
+      background ? 'Exempt from doze, standby bucket active, background ops allowed.' : missing.join(', ') + '.',
+      background ? null : 'apply'
+    );
+  }
+
+  const wifi = v.wifi || {};
+  if (wifi.connected) {
+    const weak = wifi.rssi != null && wifi.rssi < -70;
+    add(
+      'wifi',
+      'On Wi-Fi',
+      weak ? 'warn' : 'ok',
+      `${wifi.ssid || 'unknown network'}${wifi.ip ? `, ${wifi.ip}` : ''}${wifi.rssi != null ? `, signal ${wifi.rssi} dBm` : ''}${
+        weak ? ' - weak. Move the tablet or the access point.' : ''
+      }`
+    );
+  } else {
+    add('wifi', 'On Wi-Fi', 'bad', wifi.enabled === false ? 'Wi-Fi is turned off.' : 'Not connected to any network.', 'manual');
+  }
+
+  const backend = v.backend || {};
+  add(
+    'backend',
+    'Reaches Panda Eats',
+    backend.ok ? 'ok' : 'bad',
+    backend.ok ? `${BACKEND_HOST} answered${backend.ms != null ? ` in ${backend.ms} ms` : ''}.` : `${BACKEND_HOST} did not answer from the tablet. ${backend.output || ''}`.trim(),
+    backend.ok ? null : 'manual'
+  );
+
+  if (v.printerHost) {
+    const printer = v.printer || {};
+    add(
+      'printer',
+      'Reaches the printer',
+      printer.ok ? 'ok' : 'bad',
+      printer.ok
+        ? `${v.printerHost} answered${printer.ms != null ? ` in ${printer.ms} ms` : ''}.`
+        : `${v.printerHost} did not answer from the tablet. ${printer.error || printer.output || ''}`.trim(),
+      printer.ok ? null : 'manual'
+    );
+  } else {
+    add('printer', 'Reaches the printer', 'skip', 'Enter the printer\'s IP address to check. USB and Bluetooth printers have no address - skip this.');
+  }
+
+  const autoTime = v.autoTime || {};
+  const clock = v.clock || {};
+  const auto = valuesEqual(autoTime.time, 1) && valuesEqual(autoTime.zone, 1);
+  const drift = clock.driftSeconds == null ? null : Math.abs(clock.driftSeconds);
+  if (!auto) {
+    add('clock', 'Clock set automatically', 'bad', 'Automatic date, time or time zone is off. A drifted clock breaks the connection and prints wrong times.', 'apply');
+  } else if (drift != null && drift > 60) {
+    add('clock', 'Clock set automatically', 'bad', `Automatic, but ${drift} seconds off this PC. Check the network time source.`, 'manual');
+  } else {
+    add('clock', 'Clock set automatically', 'ok', `${clock.timezone || 'unknown zone'}${drift != null ? `, within ${drift} s of this PC` : ''}.`);
+  }
+
+  const lock = v.lockScreen || {};
+  if (lock.disabled === true) {
+    add('lock', 'No lock screen', 'ok', 'Orders are visible the moment the screen is on.');
+  } else if (lock.credentialType && lock.credentialType !== 'NONE') {
+    add('lock', 'No lock screen', 'bad', `A ${lock.credentialType} is set. adb cannot remove it: Settings > Lock screen > Screen lock type > None.`, 'manual');
+  } else if (lock.disabled === false) {
+    add('lock', 'No lock screen', 'bad', 'Swipe to unlock is on, so orders hide behind a swipe after every reboot.', 'apply');
+  } else {
+    add('lock', 'No lock screen', 'warn', 'Could not read the lock screen state. Check Settings > Lock screen by hand.');
+  }
+
+  const battery = v.battery || {};
+  const hot = battery.temperatureC != null && battery.temperatureC >= 45;
+  const unhealthy = battery.health && battery.health !== 'good' && battery.health !== 'unknown';
+  add(
+    'battery',
+    'Battery healthy',
+    hot || unhealthy ? 'warn' : 'ok',
+    `${battery.level != null ? `${battery.level}%` : 'level unknown'}${battery.charging ? ', charging' : ''}${
+      battery.health ? `, health ${battery.health}` : ''
+    }${battery.temperatureC != null ? `, ${battery.temperatureC} C` : ''}${hot ? ' - hot. Get it out of the sun and off the fast charger.' : ''}${
+      unhealthy ? ' - the kernel is reporting a fault. Plan a replacement.' : ''
+    }`
+  );
+
+  // Whether Play would have anything to update. A tablet one release behind
+  // still serves, so this warns rather than blocks.
+  if (prod) {
+    const latest = v.latest;
+    const have = Number(prod.versionCode);
+    if (!latest || latest.error || !Number.isFinite(have)) {
+      add(
+        'update',
+        'On the build Play is serving',
+        'skip',
+        latest && latest.error ? `Could not ask Play: ${latest.error}` : 'Not checked.'
+      );
+    } else if (have >= latest.versionCode) {
+      add('update', 'On the build Play is serving', 'ok', `${have} is the current production release (${latest.versionName || '?'}).`);
+    } else {
+      add(
+        'update',
+        'On the build Play is serving',
+        'warn',
+        `Play is serving ${latest.versionName || '?'} (${latest.versionCode}); this tablet is on ${prod.versionName || '?'} (${have}). Auto-update will catch it up; to hurry it, open the Play listing on the Setup tab.`,
+        'setup'
+      );
+    }
+  }
+
+  const accounts = v.accounts || {};
+  add(
+    'account',
+    'Google account signed in',
+    accounts.hasGoogle ? 'ok' : 'warn',
+    accounts.hasGoogle ? 'Play can update the order app.' : 'None. Play cannot update the order app; every new build has to arrive over USB.',
+    accounts.hasGoogle ? null : 'manual'
+  );
+
+  const record = v.record;
+  const when = (iso) => (iso ? new Date(iso).toLocaleDateString('en-US') : 'unknown date');
+  if (!record || !record.provisionedAt) {
+    add('record', 'Provisioned with the current profile', 'warn', 'No provisioning record on the tablet. Run Apply.', 'apply');
+  } else if (record.profile !== v.profile) {
+    add('record', 'Provisioned with the current profile', 'warn', `Provisioned ${when(record.provisionedAt)} with an older profile. Run Apply to bring it up to date.`, 'apply');
+  } else {
+    add('record', 'Provisioned with the current profile', 'ok', `Provisioned ${when(record.provisionedAt)}${record.benchVersion ? ` with Panda Bench ${record.benchVersion}` : ''}.`);
+  }
+
+  return checks;
+}
+
+/**
+ * The readiness gate. Read-only: it changes nothing on the tablet.
+ *
+ * Run after the post-Apply reboot. Where the audit asks "does this tablet
+ * match the profile", this asks "can it take an order right now" - is the
+ * listener up, can it notify, is it on the restaurant's network, can it reach
+ * the backend and the printer, is the clock right, is anything hiding the
+ * screen.
+ */
+async function verify(serial, opts = {}) {
+  const printerHost = String(opts.printerHost || '').trim();
+
+  // Asked of Google, not the tablet, so it runs alongside the adb reads.
+  const latestPromise = play
+    .latestProductionVersionCode(apk.PROD_ID)
+    .catch((err) => ({ error: err.message, source: null }));
+
+  const props = await adb.getProps(serial);
+  const installed = await adb.listPackages(serial);
+  assertInventorySane(installed);
+
+  const [wifi, clock, lockScreen, battery, accounts, doze, autoTime, autoTimeZone, adbEnabled, recordText] =
+    await Promise.all([
+      adb.getWifi(serial),
+      adb.getClock(serial),
+      adb.getLockScreen(serial),
+      adb.getBattery(serial),
+      adb.getAccounts(serial),
+      adb.getDozeWhitelist(serial),
+      adb.getSetting(serial, 'global', 'auto_time'),
+      adb.getSetting(serial, 'global', 'auto_time_zone'),
+      adb.getSetting(serial, 'global', 'adb_enabled'),
+      adb.readDeviceFile(serial, RECORD_PATH),
+    ]);
+
+  // Sequential on purpose: two pings racing on one Wi-Fi radio would make the
+  // second one's timing meaningless.
+  const backend = await adb.pingHost(serial, BACKEND_HOST);
+  const printer = printerHost ? await adb.pingHost(serial, printerHost) : null;
+
+  const apps = [];
+  for (const pkg of pandaPackages(installed)) {
+    const info = await adb.getPackageInfo(serial, pkg);
+    const services = await adb.getRunningServices(serial, pkg);
+    const permissions = permissionState(await adb.getRuntimePermissions(serial, pkg));
+    const bucket = await adb.getStandbyBucket(serial, pkg);
+    const ops = {};
+    for (const op of APP_OPS) ops[op] = await adb.getAppOp(serial, pkg, op);
+    apps.push({
+      pkg,
+      versionName: info.versionName,
+      versionCode: info.versionCode,
+      enabled: info.enabled,
+      running: services.length > 0,
+      listener: services.find((s) => LISTENER_SERVICE.test(s.name)) || null,
+      permissions,
+      dozeExempt: doze.has(pkg),
+      standbyBucket: bucket,
+      bucketOk: bucketIsGoodEnough(bucket),
+      opsOk: APP_OPS.every((op) => ops[op] === 'allow' || ops[op] === null),
+    });
+  }
+
+  // The production build is what serves the restaurant. A staging or dev
+  // build beside it is a test tool and does not decide readiness.
+  const prod = apps.find((a) => a.pkg === apk.PROD_ID) || null;
+
+  const report = {
+    device: {
+      serial,
+      manufacturer: props['ro.product.manufacturer'] || '',
+      model: props['ro.product.model'] || '',
+      androidRelease: props['ro.build.version.release'] || '',
+    },
+    apps,
+    prod,
+    wifi,
+    backend,
+    printer,
+    printerHost,
+    clock,
+    autoTime: { time: autoTime, zone: autoTimeZone },
+    lockScreen,
+    battery,
+    accounts,
+    usbDebugging: adbEnabled == null ? null : valuesEqual(adbEnabled, 1),
+    record: parseRecord(recordText),
+    profile: profiles.fingerprint(),
+    latest: await latestPromise,
+    checkedAt: new Date().toISOString(),
+  };
+  report.checks = readinessChecks(report);
+  report.ready = report.checks.every((c) => c.status !== 'bad');
+  return report;
+}
+
+// ---------------------------------------------------------------------------
+// Test slip - prove the tablet-to-printer path without the order app
+// ---------------------------------------------------------------------------
+
+/**
+ * A short ESC/POS receipt. Pure. The same bytes the order app's templates
+ * would open and close with (ESC @ to reset, GS V 66 0 to feed and cut), so
+ * a printer that takes this takes real receipts.
+ */
+function testSlipBytes({ model, serial, host, when = new Date() }) {
+  const ESC = 0x1b;
+  const GS = 0x1d;
+  const parts = [];
+  const raw = (...bytes) => parts.push(Buffer.from(bytes));
+  const line = (text = '') => parts.push(Buffer.from(`${text}\n`, 'latin1'));
+
+  raw(ESC, 0x40); // initialise
+  raw(ESC, 0x61, 0x01); // centre
+  raw(ESC, 0x45, 0x01); // bold on
+  line('PANDA EATS');
+  raw(ESC, 0x45, 0x00); // bold off
+  line('Panda Bench test slip');
+  line();
+  raw(ESC, 0x61, 0x00); // left
+  line(`Tablet   ${model || '?'}`);
+  line(`Serial   ${serial}`);
+  line(`Printer  ${host}:9100`);
+  line(`Printed  ${when.toLocaleString('en-US')}`);
+  line();
+  raw(ESC, 0x61, 0x01); // centre
+  line('If you can read this, the tablet');
+  line('reaches the printer over its own Wi-Fi.');
+  line();
+  raw(ESC, 0x64, 0x04); // feed 4 lines
+  raw(GS, 0x56, 0x42, 0x00); // feed and cut
+  return Buffer.concat(parts);
+}
+
+/**
+ * Push the slip to the tablet and have the tablet send it to the printer on
+ * port 9100. Only LAN printers: USB and Bluetooth ones have no address.
+ *
+ * A clean send means the printer accepted a TCP connection and took the
+ * bytes over the tablet's own Wi-Fi - the whole path the order app uses.
+ * Whether paper came out is for the operator's eyes.
+ */
+async function printTestSlip(serial, host, onProgress = () => {}) {
+  const log = (level, message) => onProgress({ level, message });
+  const target = String(host || '').trim();
+  if (!target) {
+    log('error', "Enter the printer's IP address first.");
+    return { ok: false };
+  }
+
+  const props = await adb.getProps(serial);
+  const bytes = testSlipBytes({ model: props['ro.product.model'], serial, host: target });
+  const safeSerial = String(serial).replace(/[^\w.-]/g, '_');
+  const tmp = path.join(os.tmpdir(), `panda-bench-slip-${safeSerial}.bin`);
+  fs.writeFileSync(tmp, bytes);
+
+  const devicePath = '/data/local/tmp/panda-bench-slip.bin';
+  const pushed = await adb.pushFile(serial, tmp, devicePath);
+  if (!pushed.ok) {
+    log('error', `Could not copy the slip to the tablet: ${pushed.stderr || pushed.stdout}`);
+    return { ok: false };
+  }
+
+  log('info', `Sending ${bytes.length} bytes from the tablet to ${target}:9100...`);
+  const r = await adb.sendFileToPort(serial, target, 9100, devicePath);
+  if (r.ok) {
+    log('done', `The printer at ${target} took the slip. If nothing came out, it is not speaking ESC/POS on port 9100.`);
+  } else {
+    log('error', `Could not reach ${target}:9100 from the tablet${r.output ? ` - ${r.output}` : ''}${r.error ? ` (${r.error})` : ''}.`);
+  }
+  return { ok: r.ok, bytes: bytes.length };
+}
+
+// ---------------------------------------------------------------------------
+// Ship - the last thing that happens on the bench
+// ---------------------------------------------------------------------------
+
+/**
+ * Write the handover into the tablet's record, then turn USB debugging off.
+ *
+ * Debugging is off because a counter tablet has an unlocked screen, and with
+ * debugging on, anyone with a cable and a laptop can accept the prompt on
+ * that screen and do everything this tool does. The cost is real: putting
+ * the tablet back on the bench means seven taps on the build number and one
+ * toggle, on the tablet itself. Whether the gate was met is the operator's
+ * call - main asks before this runs - so this just does what it is told and
+ * says what it did.
+ */
+async function ship(serial, opts = {}, onProgress = () => {}) {
+  const log = (level, message) => onProgress({ level, message });
+  const handover = readHandover(serial);
+
+  const written = await writeRecord(serial, {
+    shippedAt: new Date().toISOString(),
+    benchVersion,
+    checklist: handover.checklist,
+    printerHost: handover.printerHost || null,
+    unmet: Array.isArray(opts.unmet) ? opts.unmet : [],
+  });
+  log(written.ok ? 'ok' : 'warn', written.ok ? `Handover written to ${RECORD_PATH}` : 'Could not write the handover to the tablet - carrying on.');
+
+  log('info', 'Turning USB debugging off. The tablet drops off adb the moment this lands.');
+  const r = await adb.disableUsbDebugging(serial);
+  if (r.ok) {
+    log('done', 'USB debugging is off. To put this tablet back on the bench, turn it on again in Settings > Developer options.');
+  } else {
+    log('error', `Could not turn USB debugging off${r.stderr ? `: ${r.stderr}` : ''}. Turn it off by hand in Developer options.`);
+  }
+  return { ok: r.ok, recordWritten: written.ok };
+}
+
+// ---------------------------------------------------------------------------
 // Discover
 // ---------------------------------------------------------------------------
 
@@ -1120,7 +1820,9 @@ module.exports = {
   discover,
   listBackups,
   setStateDir,
+  setBenchVersion,
   valuesEqual,
+  assertInventorySane,
   tuneAppBackground,
   inspectInstall,
   installApp,
@@ -1128,4 +1830,15 @@ module.exports = {
   setWallpaper,
   openSystemUpdate,
   patchAge,
+  verify,
+  readinessChecks,
+  readHandover,
+  saveHandover,
+  testSlipBytes,
+  printTestSlip,
+  ship,
+  parseRecord,
+  RUNTIME_PERMISSIONS,
+  CHECKLIST,
+  RECORD_PATH,
 };

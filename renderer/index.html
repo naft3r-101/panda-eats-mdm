@@ -36,6 +36,7 @@
           <div class="adb-actions">
             <button class="ghost-btn" id="locateAdb" type="button">Locate adb</button>
             <button class="ghost-btn" id="openProfiles" type="button">Profiles</button>
+            <button class="ghost-btn" id="checkUpdates" type="button">Updates</button>
           </div>
         </footer>
       </aside>
@@ -49,26 +50,15 @@
             <h2 id="deviceTitle">No tablet selected</h2>
             <p id="deviceSubtitle">Plug a tablet in over USB and accept the debugging prompt on its screen.</p>
             <p class="drift-chip" id="driftChip" hidden></p>
+            <p class="record-chip" id="recordChip" hidden></p>
           </div>
           <div class="tabs" role="tablist" aria-label="Sections">
-            <button class="tab" role="tab" id="tab-audit" aria-controls="panel-audit" aria-selected="true" type="button">Audit</button>
             <button class="tab" role="tab" id="tab-install" aria-controls="panel-install" aria-selected="false" tabindex="-1" type="button">Setup</button>
-            <button class="tab" role="tab" id="tab-provision" aria-controls="panel-provision" aria-selected="false" tabindex="-1" type="button">Provision</button>
-            <button class="tab" role="tab" id="tab-discover" aria-controls="panel-discover" aria-selected="false" tabindex="-1" type="button">Discover</button>
-            <button class="tab" role="tab" id="tab-rollback" aria-controls="panel-rollback" aria-selected="false" tabindex="-1" type="button">Rollback</button>
+            <button class="tab" role="tab" id="tab-provision" aria-controls="panel-provision" aria-selected="true" type="button">Provision</button>
+            <button class="tab" role="tab" id="tab-verify" aria-controls="panel-verify" aria-selected="false" tabindex="-1" type="button">Verify</button>
+            <button class="tab" role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="false" tabindex="-1" type="button">Tools</button>
           </div>
         </div>
-
-        <!-- Audit --------------------------------------------------------- -->
-        <section class="panel" id="panel-audit" role="tabpanel" aria-labelledby="tab-audit">
-          <div class="panel-actions">
-            <button class="primary-btn" id="runAudit" type="button" disabled>Run audit</button>
-            <span class="hint">Read-only. Touches nothing on the tablet.</span>
-          </div>
-          <div id="auditBody" class="panel-body">
-            <p class="empty">Select a tablet, then run an audit to see what is drifted.</p>
-          </div>
-        </section>
 
         <!-- Install ------------------------------------------------------- -->
         <section class="panel" id="panel-install" role="tabpanel" aria-labelledby="tab-install" hidden>
@@ -190,8 +180,9 @@
           </div>
         </section>
 
-        <!-- Provision ----------------------------------------------------- -->
-        <section class="panel" id="panel-provision" role="tabpanel" aria-labelledby="tab-provision" hidden>
+        <!-- Provision: the audit and the plan are one read ----------------- -->
+        <section class="panel" id="panel-provision" role="tabpanel" aria-labelledby="tab-provision">
+          <div id="managedBanner"></div>
           <div class="options" id="options">
             <button class="switch" role="switch" aria-checked="false" data-opt="aggressive" type="button">
               <span class="switch-track"><span class="switch-thumb"></span></span>
@@ -237,10 +228,64 @@
           <div class="log" id="log" role="log" aria-live="polite" aria-label="Provisioning log">
             <p class="empty">Nothing run yet.</p>
           </div>
+
+          <div class="section-head">What the tablet looks like</div>
+          <div id="auditBody" class="panel-body">
+            <p class="empty">Select a tablet to read it.</p>
+          </div>
         </section>
 
-        <!-- Discover ------------------------------------------------------ -->
-        <section class="panel" id="panel-discover" role="tabpanel" aria-labelledby="tab-discover" hidden>
+        <!-- Verify -------------------------------------------------------- -->
+        <section class="panel" id="panel-verify" role="tabpanel" aria-labelledby="tab-verify" hidden>
+          <div class="panel-actions">
+            <button class="primary-btn" id="runVerify" type="button" disabled>Check readiness</button>
+            <button class="ghost-btn" id="launchFromVerify" type="button" disabled>Open order app on tablet</button>
+            <label class="field" for="printerHost">
+              <span>Printer IP</span>
+              <input id="printerHost" type="text" inputmode="decimal" placeholder="192.168.1.50" spellcheck="false" autocomplete="off" />
+            </label>
+            <button class="ghost-btn" id="printSlip" type="button" disabled>Print test slip</button>
+            <span class="hint">Read-only, apart from the slip. Run it after the reboot. Red rows are fixed on the Provision tab or by hand on the tablet.</span>
+          </div>
+          <div id="verifyBody" class="panel-body">
+            <p class="empty">Select a tablet, then check readiness to see whether it can take an order right now.</p>
+          </div>
+          <div id="checklistBody"></div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Ship</h3>
+              <span class="count" id="shipStatus">-</span>
+            </div>
+            <p class="card-note">
+              The last thing that happens on the bench. Writes the ticks above into the tablet's own record, then
+              turns USB debugging off, because a counter tablet has an unlocked screen and with debugging on anyone
+              with a cable can do everything this tool does. Putting it back on the bench means Settings &gt;
+              Developer options on the tablet itself. It asks first, and names anything still red or unticked.
+            </p>
+            <div class="card-foot">
+              <button class="primary-btn" id="shipDevice" type="button" disabled>Ship tablet</button>
+            </div>
+          </div>
+
+          <div class="log" id="verifyLog" role="log" aria-live="polite" aria-label="Ship log">
+            <p class="empty">Nothing run yet.</p>
+          </div>
+        </section>
+
+        <!-- Tools: Rollback and Discover, used once a month --------------- -->
+        <section class="panel" id="panel-tools" role="tabpanel" aria-labelledby="tab-tools" hidden>
+          <div class="section-head">Rollback</div>
+          <div class="panel-actions">
+            <button class="primary-btn" id="loadBackups" type="button" disabled>Refresh rollback points</button>
+            <button class="ghost-btn" id="openState" type="button">Open folder</button>
+            <span class="hint">Each Apply writes one. Reverting restores settings, re-enables packages, undoes app tuning, revokes granted permissions and puts the lock screen back.</span>
+          </div>
+          <div id="rollbackBody" class="panel-body">
+            <p class="empty">No rollback points loaded.</p>
+          </div>
+
+          <div class="section-head">Discover</div>
           <div class="panel-actions">
             <button class="primary-btn" id="runDiscover" type="button" disabled>Scan for unknown packages</button>
             <button class="primary-btn danger" id="disableSelected" type="button" disabled>Disable selected</button>
@@ -253,19 +298,24 @@
             <p class="empty">Nothing run yet.</p>
           </div>
         </section>
-
-        <!-- Rollback ------------------------------------------------------ -->
-        <section class="panel" id="panel-rollback" role="tabpanel" aria-labelledby="tab-rollback" hidden>
-          <div class="panel-actions">
-            <button class="primary-btn" id="loadBackups" type="button" disabled>Refresh rollback points</button>
-            <button class="ghost-btn" id="openState" type="button">Open folder</button>
-            <span class="hint">Each Apply writes one. Reverting restores settings, re-enables packages, and undoes app tuning.</span>
-          </div>
-          <div id="rollbackBody" class="panel-body">
-            <p class="empty">No rollback points loaded.</p>
-          </div>
-        </section>
       </main>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <!-- Update popup. One dialog for the whole life of a check: looking,    -->
+    <!-- found, downloading, ready. It never installs anything on its own.   -->
+    <!-- ------------------------------------------------------------------ -->
+    <div class="modal-backdrop" id="updateModal" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="updateTitle" aria-describedby="updateBody">
+        <h3 id="updateTitle">Updates</h3>
+        <p id="updateBody"></p>
+        <pre class="update-notes" id="updateNotes" hidden></pre>
+        <p class="update-warning" id="updateWarning" hidden>A tablet is mid-run. Let it finish before restarting.</p>
+        <div class="modal-foot">
+          <button class="ghost-btn" id="updateDismiss" type="button">Close</button>
+          <button class="primary-btn" id="updateAction" type="button" hidden>Restart now</button>
+        </div>
+      </div>
     </div>
 
     <script src="app.js"></script>

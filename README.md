@@ -21,6 +21,10 @@ on a tablet that is already in the field, including one that is already paired t
 | **Audible** | Do Not Disturb off, media volume pinned to the device maximum |
 | **Readable** | Adaptive brightness off, no pre-sleep dim, no battery-saver brightness limiter, screen held at 80% of the tablet's own maximum or higher |
 | **Background survival** | Order app added to the doze whitelist, standby bucket forced to `active`, background app-ops allowed, adaptive battery and app standby turned off |
+| **Allowed to alert** | The notification and Bluetooth runtime permissions granted to the order app. Play grants neither; a Play-installed build starts silent |
+| **Nothing in the way** | A swipe-only lock screen turned off, so orders are on screen the moment the tablet is. A PIN is reported, never removed |
+| **Battery longevity** | Charge capped at 80% (Samsung's Battery protection, "Maximum"), fast charging off. These tablets never leave the cable, and a cell held at 100% and warm is the one that swells |
+| **Clock** | Automatic date, time and time zone on. A drifted clock breaks the backend connection and prints wrong times |
 | **Network** | Wi-Fi scan throttling off, Wi-Fi stays up while asleep, captive-portal nagging off |
 
 ### What it deliberately does NOT do
@@ -43,14 +47,24 @@ These were decisions, not omissions.
 
 **On your PC**
 
-Android platform-tools must be installed. Panda Bench looks for `adb.exe` in this order:
+Nothing. **adb ships inside the installer**, so a fresh bench PC needs no Android SDK, no
+download and nothing on `PATH` - the sidebar just says `adb 37.0.1 (included)`.
+
+It is still possible to run a different one. Panda Bench looks for `adb.exe` in this order:
 
 1. `PANDA_BENCH_ADB` environment variable
-2. `ANDROID_HOME` / `ANDROID_SDK_ROOT` + `platform-tools`
-3. `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` (where yours already is)
-4. `adb` on `PATH`
+2. The copy that came with the installer
+3. `ANDROID_HOME` / `ANDROID_SDK_ROOT` + `platform-tools`
+4. `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`
+5. `adb` on `PATH`
 
-If it cannot find it, the sidebar turns red and the **Locate adb** button lets you point at it.
+If somehow none of those exist, the sidebar turns red and the **Locate adb** button lets you point
+at one.
+
+The bundled copy is not in this repo. `scripts/fetch-platform-tools.js` downloads Google's
+platform-tools into gitignored `vendor/` on every `pnpm build`, keeps `adb.exe`, its two DLLs and
+Google's `NOTICE.txt`, and electron-builder packs them as `resources/platform-tools`. Run
+`pnpm vendor:adb --force` to pick up a newer platform-tools release.
 
 **On the tablet**
 
@@ -67,24 +81,57 @@ pnpm start          # or: pnpm dev, which opens devtools
 
 ---
 
+## Keeping Panda Bench itself up to date
+
+An installed copy checks the repo's releases when it starts, and **Updates** in the sidebar checks
+on demand. A new version downloads quietly in the background and a popup offers to install it; it
+only ever installs when you press **Restart now**, and if a tablet is mid-run the popup waits until
+the run finishes rather than interrupting it. Releases are public, so a bench PC needs no token and
+no GitHub account.
+
+Publishing a new version, from this PC:
+
+```bash
+GH_TOKEN="$(gh auth token)" pnpm release
+```
+
+That refreshes the bundled adb, creates the GitHub release for the version in `package.json`, builds
+the installer and uploads it. Every bench PC picks it up the next time it starts.
+
+---
+
 ## The workflow
 
+Four tabs, in the order a tablet goes through them: **Setup**, **Provision**, **Verify**, **Tools**.
+
 ```
-1. Plug tablet in       -> verify: it appears in the sidebar with its model name
-2. Audit tab -> Run     -> verify: tiles show what is drifted (read-only, changes nothing)
-3. Provision tab        -> verify: the plan lists every change it is about to make
+1. Plug tablet in       -> verify: it appears in the sidebar with its model name, and the chip
+                                   under it says whether it was ever provisioned
+2. Setup tab            -> verify: the order app is installed (Play, or an APK), wallpaper set
+3. Provision tab        -> verify: the plan lists every change it is about to make, and the
+                                   audit detail below the log shows why (read-only until Apply)
 4. Set Aggressive?      -> verify: the plan re-reads the tablet and the counts move
 5. Apply                -> verify: every log line is a green check
 6. Reboot the tablet    -> verify: the plan re-reads to "Nothing to apply"
-7. Open the order app   -> verify: it pairs, chimes on a test order, prints
+7. Verify tab           -> verify: Overall says Ready; every red row is gone; a test slip printed
+8. Tick the checklist   -> verify: pair, Wi-Fi, printer, test order - the taps only a human
+                                   can do, kept per tablet
+9. Ship                 -> verify: the handover is on the tablet and USB debugging is off
 ```
 
 Step 6 matters. Some settings only fully take effect after a reboot, and an audit on a freshly
 rebooted tablet is the only audit worth trusting.
 
-**Audit and Provision are the same read.** Both go through `preview()`, which returns an audit and
-the exact plan Apply would execute, built by the single planner in `provision.js`. There is no way
-for the preview and the execution to disagree about what "disable this package" means.
+Step 7 is the difference between "matches the profile" and "can take an order". The Provision tab
+answers the first question; the Verify tab answers the second, from the tablet's own point of view.
+
+**The audit and the plan are the same read**, which is why they share a tab. One call to
+`preview()` returns the audit and the exact plan Apply would execute, built by the single planner
+in `provision.js`; the plan sits above the Apply button and the audit detail (device, order app,
+settings, bloat) below its log. There is no way for the preview and the execution to disagree
+about what "disable this package" means.
+
+**Tools** holds Rollback and Discover, the two things used once a month.
 
 **Apply still re-reads the tablet at execution time.** The preview on screen may be minutes old,
 or may belong to a tablet you have since unplugged, so the plan that actually runs is always built
@@ -183,6 +230,80 @@ leaves a working revert. The Rollback tab lists them per tablet. Reverting:
 
 Rollback points live in `state/` during development, and in the app's userData folder once
 packaged. The **Open folder** button on the Rollback tab takes you there.
+
+Reverting also revokes the runtime permissions that run granted and turns a lock screen that run
+switched off back on.
+
+### The Verify tab
+
+Read-only, and meant for the moment after the reboot. Where the audit asks "does this tablet match
+the profile", Verify asks "can it take an order right now", and it asks the tablet rather than the
+PC:
+
+| Check | How it is read |
+| ----- | -------------- |
+| Order app installed, and the **production** build | `pm list packages`, exact match. A `.staging` or `.dev` build beside it is a test tool and does not count |
+| Order listener running as a foreground service | `dumpsys activity services`, split into exact-keyed records the same way the package dump is. The `.staging` build's service cannot stand in for prod's |
+| Notifications and Bluetooth allowed | The `runtime permissions:` section of the exact package block. The install permissions above it print `granted=true` too, and always will |
+| Survives in the background | Doze whitelist, standby bucket, app-ops - the same three reads the audit makes |
+| On the build Play is serving | The production track, read through the Play Developer API with the order app's own publishing service account (`../panda-eats-orderapp-kotlin/play-api-key.json`, or `PANDA_BENCH_PLAY_KEY`). A tablet behind is a warning, not a block; without the key the row is skipped and says so |
+| On Wi-Fi, with a usable signal | `cmd wifi status`: network name, address, RSSI. Below -70 dBm is flagged |
+| Reaches Panda Eats | One `ping` **from the tablet** to `app.getpandaeats.com`. What this PC can reach says nothing about a tablet on the restaurant's Wi-Fi |
+| Reaches the printer | Same, against the address you type in. Remembered per tablet. USB and Bluetooth printers have no address; leave it empty and the row is skipped |
+| Clock set automatically | `auto_time`, `auto_time_zone`, and the tablet's epoch against this PC's. More than a minute out is red |
+| No lock screen | `locksettings get-disabled` plus the credential type. Swipe-only is red and Apply fixes it; a PIN is red and only a human can |
+| Battery healthy | Health and temperature from `dumpsys battery`. A warning, never a block |
+| Google account signed in | So Play can update the app. A warning |
+| Provisioned with the current profile | The record on the tablet (below) against a fingerprint of `profiles/` as it is now |
+
+Only red rows make the tablet **Not ready**. Each one says where it gets fixed: the Provision tab,
+the Setup tab, "Open order app on tablet", or the tablet's own screen.
+
+**Print test slip** sends a short ESC/POS receipt to the printer address **from the tablet**: the
+bytes are pushed to the tablet and its own `nc` opens port 9100, so what is proved is the exact
+path the order app prints over, with no need for the app to be paired or the printer configured in
+it. The slip opens with `ESC @` and closes with a feed-and-cut, the same framing the app's
+templates use. LAN printers only; USB and Bluetooth have no address.
+
+Under the checks is the **by-hand checklist**: pairing, the restaurant's Wi-Fi, the printer and
+its "Always allow", a test order. Each of these ends in a tap on the tablet or needs something only
+the restaurant has, so Apply cannot do them and they used to live only in this file. Ticks are kept
+per serial on this PC, in `state/handover/`, so a tablet that comes back shows what was done last
+time.
+
+Three things that were on that list are not any more, because they turned out not to need a human.
+The battery optimization dialog asks for exactly what Apply's doze exemption grants, and the order
+app skips the prompt when it is already exempt. Samsung's "Never sleeping apps" list never offers
+PE Orders, because the same exemption is what Settings calls battery usage "Unrestricted" and the
+sleeping-app pickers only list apps that can be put to sleep; on One UI 6.1 the whole Background
+usage limits menu is gone from the Battery page anyway. Play auto-update cannot be read or set over
+adb, but what it is for - being on the build Play serves - is now a check. Of what is left, pairing and
+the printer setup could be automated with a hook in the order app (it owns the credential store
+and the printer database), a test order needs an endpoint in the backend, and joining Wi-Fi from
+adb is refused on One UI 6.1 (`connect-network` needs system rights). Those are order-app and
+backend cards, not bench ones.
+
+**Ship** is the last button. It writes the ticks into the tablet's record, then turns USB
+debugging off, because a counter tablet has an unlocked screen and with debugging on anyone with a
+cable can accept the prompt on that screen and do everything this tool does. It asks first and
+names anything still red or unticked; shipping anyway is allowed, and recorded. Putting the tablet
+back on the bench means Settings > Developer options on the tablet itself, so do not ship one you
+are about to need.
+
+### The record on the tablet
+
+Apply writes `/sdcard/Documents/panda-bench.json` on the tablet: when it was provisioned, with which
+Panda Bench, with which profile (an 8-character fingerprint of `profiles/`, comments excluded),
+whether Aggressive was on. Ship adds when it shipped and the checklist. The chip under the device
+name reads it the moment a tablet is plugged in:
+
+```
+Provisioned 9/15/2026 with v0.3.6, shipped 9/15/2026 - profile has changed since
+```
+
+A tablet with no record has never been through this tool, and the chip says so. The file is in
+Documents on purpose: it survives the order app being uninstalled and is visible in the Files app,
+so the tablet carries its own history without anyone having to find the bench PC it was done on.
 
 ---
 
@@ -334,15 +455,23 @@ Be honest about the gaps. These still need a human on the tablet's own screen:
 - **Installing from Google Play.** Needs a Google account signed in on the device. Panda Bench
   opens the right listing so there is nothing to type.
 
-- **Samsung "Sleeping apps"** (Device Care → Battery → Background usage limits). Samsung's own
-  sleeper is separate from AOSP's doze, and there is no reliable adb path to the never-sleeping
-  list. Add the order app there by hand. On the SM-T510 this is the single most likely cause of a
-  tablet that goes quiet overnight.
+- **Samsung "Sleeping apps"** is not a gap after all. The doze exemption Apply sets is what
+  Settings > Apps > PE Orders > Battery shows as **Unrestricted**, Samsung's sleeper skips such
+  apps, and its pickers do not even offer them. If a Samsung tablet goes quiet overnight, check that
+  page reads Unrestricted (the Verify tab's "Survives in the background" row is the same fact).
 - **Battery optimization dialog.** The order app already fires this itself once per pairing
   (`MainActivity.maybeRequestBatteryExemption`), so accept it when it appears.
-- **Screen lock.** Cannot be reliably removed over adb. Set the tablet to no lock screen manually.
-- **Wi-Fi credentials and Google sign-in.** Manual, obviously.
-- **Play auto-update.** A per-app toggle inside the Play Store UI. Untouched by decision.
+- **A screen lock with a code.** Swipe-only is handled: `locksettings set-disabled true` turns it
+  off and Apply does that. A PIN, pattern or password needs the code itself, so it is reported on
+  the Audit and Verify tabs and left alone.
+- **Wi-Fi credentials and Google sign-in.** Manual. `cmd wifi connect-network` exists but is
+  refused to the shell user on One UI 6.1, so there is no adb path onto a network.
+- **Play auto-update.** A per-app toggle inside the Play Store UI. Untouched by decision, and
+  unreadable over adb - the Verify tab checks the outcome instead (is the tablet on the build Play
+  is serving).
+
+The ones that need a tap are on the Verify tab's checklist, so they get ticked rather than
+remembered.
 
 ---
 
@@ -357,6 +486,26 @@ Be honest about the gaps. These still need a human on the tablet's own screen:
 - The Lenovo list is incomplete and known to be. Use Discover.
 - Not signed. Building an installer with `pnpm build` produces an exe that Windows SmartScreen will
   warn about. Running from source with `pnpm start` avoids that entirely and is the intended use.
+- Running from a shell that Claude Code opened needs `ELECTRON_RUN_AS_NODE` unset first, or
+  Electron starts as plain Node and `app` is undefined.
+
+---
+
+## Tests and CI
+
+```bash
+pnpm test
+```
+
+`node:test`, no framework, no tablet needed. The parsers in `adb.js` are fed text captured from
+real tablets (CRLF included), the planner and the readiness checks are exercised as pure functions,
+and `profiles/` is held to a few invariants - the most important being that **no bloat entry names
+a protected package**, which is the mistake that once rebooted a tablet mid-run. Add a sample to
+`test/adb.test.js` whenever a new dump shape bites.
+
+`.github/workflows/ci.yml` runs the suite on the self-hosted `panda-ci` pool on every push and PR.
+It skips the Electron binary download, because nothing in the suite launches Electron. A job that
+queues and never starts means this repo has no runner registered yet.
 
 ---
 
@@ -367,12 +516,15 @@ electron/
   main.js        window + IPC handlers
   preload.js     the entire renderer surface (contextIsolation on, nodeIntegration off)
   adb.js         adb plumbing: run, normalise, parse. No policy.
-  provision.js   the engine: audit, apply, revert, discover. All policy.
-  profiles.js    loads the text profiles
+  provision.js   the engine: audit, apply, revert, verify, test slip, ship, discover. All policy.
+  profiles.js    loads the text profiles, fingerprints them
+  play.js        what Play is serving, via the Developer API and the order app's service account
 renderer/
-  index.html     four tabs
+  index.html     four tabs: Setup, Provision, Verify, Tools
   styles.css     brand tokens mirroring the order app's Color.kt
   app.js         no framework
 profiles/        editable text, hot-loaded, no rebuild needed
 state/           rollback points, one JSON per Apply
+  handover/      the per-tablet checklist and printer address
+test/            node:test suites for the parsers, planner, checks and profiles
 ```

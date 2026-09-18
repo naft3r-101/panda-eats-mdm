@@ -1,6 +1,6 @@
 {
   "name": "panda-bench",
-  "version": "0.3.6",
+  "version": "0.6.0",
   "private": true,
   "description": "Panda Bench - tablet provisioning workbench for Panda Eats order-taking tablets. Audits, debloats, and tunes an Android tablet over adb. No root, no factory reset, fully reversible.",
   "main": "electron/main.js",
@@ -8,8 +8,10 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "build": "electron-builder --win --x64",
-    "release": "node scripts/ensure-release.js && electron-builder --win --x64 --publish always"
+    "test": "node --test \"test/**/*.test.js\"",
+    "vendor:adb": "node scripts/fetch-platform-tools.js",
+    "build": "node scripts/fetch-platform-tools.js && electron-builder --win --x64",
+    "release": "node scripts/fetch-platform-tools.js --force && node scripts/ensure-release.js && electron-builder --win --x64 --publish always"
   },
   "devDependencies": {
     "electron": "^43.4.0",
@@ -38,6 +40,10 @@
         "to": "profiles"
       },
       {
+        "from": "vendor/platform-tools",
+        "to": "platform-tools"
+      },
+      {
         "from": "build",
         "to": "wallpapers",
         "filter": [
@@ -54,7 +60,7 @@
         "provider": "github",
         "owner": "naft3r-101",
         "repo": "panda-eats-mdm",
-        "private": true,
+        "private": false,
         "releaseType": "release"
       }
     ]

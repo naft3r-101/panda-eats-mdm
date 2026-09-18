@@ -85,7 +85,36 @@ global low_power 0
 # Samsung One UI specific. Absent on other OEMs, harmless there.
 global app_auto_restriction_enabled false
 global automatic_power_save_mode 0
-global adaptive_fast_charging 1
+
+
+# ---------------------------------------------------------------------------
+# Battery longevity
+# ---------------------------------------------------------------------------
+# These tablets live on a charger for years. A lithium cell held at 100% and
+# warm is the one that swells, and a swollen battery is the most common way a
+# counter tablet physically dies. Both keys are Samsung's; on other OEMs they
+# are stored and ignored.
+#
+# Battery protection. On One UI 6.1 (Android 14) 1 = "Maximum", which stops
+# charging at 80%; 3 = "Basic" (stop at 100%, resume at 95%); 0 = off. All
+# three were set and read back off the Battery protection screen of an
+# SM-T227U on September 15, 2026. On One UI 4 and 5 the same key is the
+# single 85% cap, so 1 is the right value everywhere it exists.
+global protect_battery 1
+
+# Fast charging is heat, and a tablet that never leaves the cable gains
+# nothing from it. This used to be 1.
+global adaptive_fast_charging 0
+
+
+# ---------------------------------------------------------------------------
+# Clock
+# ---------------------------------------------------------------------------
+# A drifted clock breaks TLS to the backend and prints wrong times on every
+# receipt, and until now nothing checked it. Both are on out of the box; this
+# puts them back if someone turned them off.
+global auto_time 1
+global auto_time_zone 1
 
 
 # ---------------------------------------------------------------------------
@@ -95,8 +124,11 @@ global adaptive_fast_charging 1
 # way a tablet goes quiet without anyone noticing.
 global wifi_scan_throttle_enabled 0
 
-# Deprecated on newer Android but still honoured on the SM-T510's vintage:
-# 2 = never turn wifi off while asleep.
+# 2 = never turn wifi off while asleep. Android 10 and later ignore this key
+# entirely (Wi-Fi no longer sleeps), and the whole fleet is past that now, so
+# on those tablets it is stored and never read. Kept for anything older; the
+# read-back cannot tell "stored and ignored" from "honoured", so do not expect
+# a warning about it.
 global wifi_sleep_policy 2
 
 # Stop the captive-portal walled-garden popups that can steal foreground from

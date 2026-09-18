@@ -16,63 +16,140 @@
  *      not be present. None of that should stop anyone provisioning a tablet,
  *      so failures are logged and the app carries on.
  *
- * Only ever runs in a packaged build: in development electron-updater looks for
- * a dev-app-update.yml that does not exist and throws, which reads as a broken
- * app rather than as "there is nothing to update".
+ * The checking itself only ever happens in a packaged build: in development
+ * electron-updater looks for a dev-app-update.yml that does not exist and
+ * throws, which reads as a broken app rather than as "there is nothing to
+ * update". The operator can still ask, and gets told why it is off.
+ *
+ * Everything the operator sees is drawn by the renderer, not by a native
+ * dialog: one popup that follows the check from "looking" through "ready to
+ * install", so a manual check and a background one land in the same place.
  */
 
-const { app, dialog } = require('electron');
+const { app } = require('electron');
 
-function initAutoUpdate(getWindow = () => null) {
-  if (!app.isPackaged) return;
+let autoUpdater = null;
+let getWindow = () => null;
 
-  /**
-   * The feed is a private repo, so the check needs a credential, and it is read
-   * from PANDA_BENCH_UPDATE_TOKEN rather than baked into the installer - a copy
-   * of the app on its own therefore grants nobody access to the repo.
-   *
-   * electron-updater looks for GH_TOKEN, but that is the same variable the gh
-   * CLI reads, and gh prefers it over its own keyring login. A machine-wide
-   * GH_TOKEN scoped read-only to this one repo would silently break every other
-   * gh command on the bench PC. So the token is carried in our own variable and
-   * copied onto GH_TOKEN inside this process only, where nothing else sees it.
-   *
-   * No token means no self-update: the check is skipped and the app is
-   * otherwise completely normal. Provisioning a tablet must never depend on it.
-   */
-  const token = process.env.PANDA_BENCH_UPDATE_TOKEN;
-  if (!token) {
-    console.log('[updater] PANDA_BENCH_UPDATE_TOKEN not set - skipping the update check.');
-    return;
-  }
-  process.env.GH_TOKEN = token;
+/**
+ * The last thing the updater knew. A window that opens after a check, or one
+ * that missed the push, asks for this rather than starting a second check.
+ */
+let status = { state: 'idle', current: '' };
 
-  const { autoUpdater } = require('electron-updater');
+/** Why the updater is not going to do anything, or null if it will. */
+function disabledReason() {
+  if (!app.isPackaged) return 'Updates only run in an installed build. This window is running from source.';
+  return null;
+}
 
+function setStatus(next) {
+  status = { current: app.getVersion(), ...next };
+  const win = getWindow();
+  if (win && !win.isDestroyed()) win.webContents.send('selfupdate:status', status);
+}
+
+const message = (err) => (err && err.message ? err.message : String(err));
+
+/** Release notes as plain text - the feed hands them over as HTML. */
+function plainNotes(info) {
+  const raw = Array.isArray(info && info.releaseNotes)
+    ? info.releaseNotes.map((n) => (n && n.note) || '').join('\n\n')
+    : (info && info.releaseNotes) || '';
+  return String(raw)
+    .replace(/<\/(p|div|li|h\d)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '- ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (m) =>
+      ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' })[m]
+    )
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, 700);
+}
+
+/**
+ * The feed is the repo's public releases, so the check needs no credential at
+ * all and a fresh bench PC self-updates out of the box. That was not always
+ * true: the repo was private to begin with, every bench needed a token, and in
+ * practice none of them had one.
+ *
+ * PANDA_BENCH_UPDATE_TOKEN is still honoured for the day the repo goes private
+ * again, or for a rate-limited network. It is read from our own variable
+ * rather than GH_TOKEN because GH_TOKEN is what the gh CLI reads, and gh
+ * prefers it over its own keyring login - a machine-wide GH_TOKEN scoped to
+ * this one repo would silently break every other gh command on the bench PC.
+ * So it is copied onto GH_TOKEN inside this process only, where nothing else
+ * sees it.
+ */
+function loadUpdater() {
+  if (autoUpdater) return autoUpdater;
+  if (process.env.PANDA_BENCH_UPDATE_TOKEN) process.env.GH_TOKEN = process.env.PANDA_BENCH_UPDATE_TOKEN;
+
+  ({ autoUpdater } = require('electron-updater'));
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
 
   autoUpdater.on('error', (err) => {
-    console.error('[updater]', err && err.message ? err.message : err);
+    console.error('[updater]', message(err));
+    setStatus({ state: 'error', message: message(err) });
+  });
+  autoUpdater.on('update-available', (info) => {
+    setStatus({ state: 'available', version: info.version, notes: plainNotes(info) });
+  });
+  autoUpdater.on('update-not-available', () => {
+    setStatus({ state: 'current' });
+  });
+  autoUpdater.on('download-progress', (p) => {
+    setStatus({ state: 'downloading', version: status.version, notes: status.notes, percent: Math.round(p.percent || 0) });
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    setStatus({ state: 'downloaded', version: info.version, notes: plainNotes(info) });
   });
 
-  autoUpdater.on('update-downloaded', async (info) => {
-    const win = getWindow();
-    const { response } = await dialog.showMessageBox(win || undefined, {
-      type: 'info',
-      buttons: ['Restart now', 'Later'],
-      defaultId: 0,
-      cancelId: 1,
-      title: 'Update ready',
-      message: `Panda Bench ${info.version} is ready to install.`,
-      detail: 'It installs when the app restarts. Finish anything running on a tablet first.',
-    });
-    if (response === 0) autoUpdater.quitAndInstall();
-  });
-
-  autoUpdater.checkForUpdates().catch((err) => {
-    console.error('[updater] check failed:', err && err.message ? err.message : err);
-  });
+  return autoUpdater;
 }
 
-module.exports = { initAutoUpdate };
+/**
+ * Ask the feed. Resolves once the answer is known - the download that may
+ * follow carries on in the background and reports itself through the pushes.
+ */
+async function checkForUpdates() {
+  const reason = disabledReason();
+  if (reason) {
+    setStatus({ state: 'disabled', reason });
+    return status;
+  }
+  setStatus({ state: 'checking' });
+  try {
+    await loadUpdater().checkForUpdates();
+  } catch (err) {
+    console.error('[updater] check failed:', message(err));
+    setStatus({ state: 'error', message: message(err) });
+  }
+  return status;
+}
+
+/** Only ever reached by the operator pressing the button in the popup. */
+function installUpdate() {
+  if (!autoUpdater || status.state !== 'downloaded') return { restarting: false };
+  autoUpdater.quitAndInstall();
+  return { restarting: true };
+}
+
+function currentStatus() {
+  return status;
+}
+
+function initAutoUpdate(getWin = () => null) {
+  getWindow = getWin;
+  const reason = disabledReason();
+  if (reason) {
+    console.log(`[updater] ${reason}`);
+    setStatus({ state: 'disabled', reason });
+    return;
+  }
+  checkForUpdates();
+}
+
+module.exports = { initAutoUpdate, checkForUpdates, installUpdate, currentStatus };

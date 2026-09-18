@@ -10,6 +10,17 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('bench', {
   appVersion: () => ipcRenderer.invoke('app:version'),
 
+  /** Panda Bench's own updates - nothing to do with openSystemUpdate below,
+   *  which is the tablet's Android update screen. */
+  updateStatus: () => ipcRenderer.invoke('selfupdate:status'),
+  checkForUpdates: () => ipcRenderer.invoke('selfupdate:check'),
+  installUpdate: () => ipcRenderer.invoke('selfupdate:install'),
+  onUpdateStatus: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('selfupdate:status', listener);
+    return () => ipcRenderer.removeListener('selfupdate:status', listener);
+  },
+
   adbInfo: () => ipcRenderer.invoke('adb:info'),
   locateAdb: () => ipcRenderer.invoke('adb:locate'),
 
@@ -17,6 +28,16 @@ contextBridge.exposeInMainWorld('bench', {
   audit: (serial, opts) => ipcRenderer.invoke('audit:run', serial, opts),
   /** Audit + the exact plan Apply would execute, in one round trip. */
   preview: (serial, opts) => ipcRenderer.invoke('plan:run', serial, opts),
+  /** Re-plan from a report already in hand. No adb: the skip switches use it. */
+  buildPlan: (report, opts) => ipcRenderer.invoke('plan:build', report, opts),
+  /** The read-only readiness gate for the Verify tab. */
+  verify: (serial, opts) => ipcRenderer.invoke('verify:run', serial, opts),
+  getHandover: (serial) => ipcRenderer.invoke('handover:get', serial),
+  saveHandover: (serial, patch) => ipcRenderer.invoke('handover:set', serial, patch),
+  /** An ESC/POS slip sent to a LAN printer from the tablet itself. */
+  printTestSlip: (serial, host) => ipcRenderer.invoke('slip:print', serial, host),
+  /** Asks for confirmation in the main process, then turns USB debugging off. */
+  ship: (serial, opts) => ipcRenderer.invoke('ship:run', serial, opts),
   apply: (serial, opts) => ipcRenderer.invoke('apply:run', serial, opts),
   /** The three-read counter-readiness check, run on every connect. */
   driftCheck: (serial) => ipcRenderer.invoke('drift:check', serial),

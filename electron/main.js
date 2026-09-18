@@ -8,7 +8,7 @@ const adb = require('./adb');
 const apk = require('./apk');
 const provision = require('./provision');
 const profiles = require('./profiles');
-const { initAutoUpdate } = require('./updater');
+const updater = require('./updater');
 
 let mainWindow = null;
 
@@ -47,8 +47,9 @@ function createWindow() {
 
 app.whenReady().then(() => {
   provision.setStateDir(resolveStateDir());
+  provision.setBenchVersion(app.getVersion());
   createWindow();
-  initAutoUpdate(() => mainWindow);
+  updater.initAutoUpdate(() => mainWindow);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -82,9 +83,22 @@ function handle(channel, fn) {
  */
 handle('app:version', async () => app.getVersion());
 
+/**
+ * Panda Bench's own updates. Named apart from update:open, which opens the
+ * TABLET's system update screen - the two have nothing to do with each other.
+ * Checking is safe to do at any time; installing quits the app, so it is only
+ * ever reached from the popup's own button.
+ */
+handle('selfupdate:status', async () => updater.currentStatus());
+handle('selfupdate:check', async () => updater.checkForUpdates());
+handle('selfupdate:install', async () => updater.installUpdate());
+
 handle('adb:info', async () => ({
   path: adb.resolveAdb(),
   found: fs.existsSync(adb.resolveAdb()),
+  /** True when it is the copy that came with the installer, not one on the PC. */
+  bundled: adb.resolveAdb() === adb.bundledAdb(),
+  adbVersion: adb.bundledAdbVersion(),
   profilesDir: profiles.profilesDir(),
   stateDir: resolveStateDir(),
   oems: profiles.availableOems(),
@@ -107,7 +121,55 @@ handle('audit:run', async (event, serial, opts) => provision.audit(serial, opts 
 
 handle('plan:run', async (event, serial, opts) => provision.preview(serial, opts || {}));
 
+/**
+ * The planner without the read. The renderer used to keep its own copy of
+ * the plan filter for the skip switches, and the copy drifted: it dropped the
+ * levels group, so flipping any skip switch made a dim-screen-only tablet
+ * report "Nothing to apply". One planner, called from both sides.
+ */
+handle('plan:build', async (event, report, opts) => provision.buildPlan(report, opts || {}));
+
 handle('drift:check', async (event, serial) => provision.driftCheck(serial));
+
+// --- Verify + Ship ----------------------------------------------------------
+
+handle('verify:run', async (event, serial, opts) => provision.verify(serial, opts || {}));
+
+handle('handover:get', async (event, serial) => provision.readHandover(serial));
+
+handle('handover:set', async (event, serial, patch) => provision.saveHandover(serial, patch || {}));
+
+handle('slip:print', async (event, serial, host) =>
+  provision.printTestSlip(serial, host, (progress) => {
+    if (!event.sender.isDestroyed()) event.sender.send('progress', progress);
+  })
+);
+
+/**
+ * Shipping ends with USB debugging off, which is the one change here the
+ * tablet cannot undo from the bench. The confirmation lives in main for the
+ * same reason the power ones do, and it names whatever the gate found
+ * wanting so the operator ships knowingly rather than by reflex.
+ */
+handle('ship:run', async (event, serial, opts) => {
+  const unmet = Array.isArray(opts && opts.unmet) ? opts.unmet : [];
+  const detail = [
+    'USB debugging is turned off as the last step, so Panda Bench loses the tablet. Putting it back on the bench means Settings > Developer options on the tablet itself.',
+    unmet.length
+      ? `Not everything is in order:\n\n${unmet.map((u) => `  - ${u}`).join('\n')}\n\nShip anyway?`
+      : 'Every check passed and every step is ticked.',
+  ].join('\n\n');
+  const confirmed = await confirmPowerAction({
+    message: `Ship ${serial}?`,
+    detail,
+    confirmLabel: unmet.length ? 'Ship anyway' : 'Ship',
+  });
+  if (!confirmed) return { confirmed: false, ok: false };
+  const result = await provision.ship(serial, { unmet }, (progress) => {
+    if (!event.sender.isDestroyed()) event.sender.send('progress', progress);
+  });
+  return { confirmed: true, ...result };
+});
 
 handle('apply:run', async (event, serial, opts) =>
   provision.apply(serial, opts || {}, (progress) => {

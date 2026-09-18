@@ -8,6 +8,7 @@
  * and that should not require rebuilding an Electron app.
  */
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -95,4 +96,31 @@ function availableOems() {
     .map((f) => f.replace(/\.txt$/, ''));
 }
 
-module.exports = { profilesDir, loadSettings, loadProtected, loadBloat, availableOems };
+/**
+ * A short fingerprint of everything in profiles/, so a tablet can carry a
+ * record of WHICH profile it was provisioned with. The profiles have no
+ * version number of their own - they are text files people edit on the desk -
+ * so the content is the version. A tablet whose record names a different
+ * fingerprint was provisioned before the profile changed and wants an Apply.
+ */
+function fingerprint() {
+  const dir = profilesDir();
+  const files = ['settings.txt', 'protected.txt'];
+  const bloat = path.join(dir, 'bloat');
+  if (fs.existsSync(bloat)) {
+    for (const f of fs.readdirSync(bloat).filter((f) => f.endsWith('.txt')).sort()) files.push(path.join('bloat', f));
+  }
+  const hash = crypto.createHash('sha1');
+  for (const rel of files) {
+    const full = path.join(dir, rel);
+    hash.update(rel.replace(/\\/g, '/'));
+    hash.update('\n');
+    // Comments and blank lines are not policy, so an edit to a comment does
+    // not tell every tablet in the fleet that it is out of date.
+    hash.update(readLines(full).join('\n'));
+    hash.update('\n');
+  }
+  return hash.digest('hex').slice(0, 8);
+}
+
+module.exports = { profilesDir, loadSettings, loadProtected, loadBloat, availableOems, fingerprint };

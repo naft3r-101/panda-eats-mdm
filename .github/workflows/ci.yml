@@ -1,0 +1,38 @@
+# Runs the parser and planner tests on every push and PR.
+#
+# Self-hosted on purpose: our own runners bill nothing. `panda-ci` is the
+# two-machine pool (Mac mini Lima VM, arm64; Windows PC WSL2, x86_64), so
+# either box can serve. The tests are pure Node - they never touch adb or an
+# Electron binary - which is why ELECTRON_SKIP_BINARY_DOWNLOAD is set: there is
+# no reason to pull a 100 MB Electron for a suite that does not launch it.
+#
+# One runner registration per repo, always. If this workflow queues and never
+# starts, this repo has no runner registered yet - see the CI section in the
+# workspace CLAUDE.md for how to add one.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: [self-hosted, linux, panda-ci]
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm test

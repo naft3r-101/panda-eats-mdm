@@ -132,6 +132,29 @@ button {
   display: none;
 }
 
+/* What the tablet says about itself: when it was provisioned and shipped.
+   Neutral, because it is a fact rather than a warning. */
+.record-chip {
+  display: inline-block;
+  margin-top: 7px;
+  margin-left: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--zinc-600);
+  background: var(--zinc-100);
+  border: 1px solid var(--zinc-200);
+}
+
+.record-chip[hidden] {
+  display: none;
+}
+
+.drift-chip[hidden] + .record-chip {
+  margin-left: 0;
+}
+
 .brand-version {
   color: var(--zinc-500);
   font-variant-numeric: tabular-nums;
@@ -405,6 +428,25 @@ button {
   font-size: 12.5px;
 }
 
+/* Divides a panel that holds more than one job: the audit detail under the
+   Apply log, and Rollback above Discover on the Tools tab. */
+.section-head {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--zinc-500);
+  margin: 26px 0 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--zinc-200);
+}
+
+.panel > .section-head:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
 .empty {
   color: var(--zinc-500);
   font-size: 13.5px;
@@ -629,6 +671,98 @@ button {
 .pick-row[aria-checked='true'] .row-key {
   color: var(--red);
   font-weight: 600;
+}
+
+/* The handover checklist reuses the pick row, but a tick here means "done"
+   rather than "disable this", so it is green and the label stays black. */
+.pick-row.check {
+  align-items: flex-start;
+}
+
+.pick-row.check .pick-box {
+  margin-top: 2px;
+}
+
+.pick-row.check[aria-checked='true'] .pick-box {
+  background: var(--emerald);
+  border-color: var(--emerald);
+}
+
+.pick-row.check[aria-checked='true'] .row-key {
+  color: var(--zinc-900);
+  font-weight: 500;
+}
+
+.pick-row.check .row-key {
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+.pick-row.check .check-note {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--zinc-500);
+  line-height: 1.45;
+}
+
+.pick-row.check[aria-checked='true'] .check-note {
+  color: var(--zinc-400);
+}
+
+/* One readiness check per row: status, what was checked, what was found. */
+.check-row .row-key {
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 550;
+  flex: 0 1 240px;
+}
+
+.check-row .check-detail {
+  flex: 1 1 260px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--zinc-600);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.check-row .check-fix {
+  color: var(--zinc-500);
+  font-style: italic;
+}
+
+/* The printer address on the Verify tab. A text input is fine here; it is the
+   dropdowns and pickers that must never be left native. */
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--zinc-600);
+}
+
+.field input {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 6px 9px;
+  width: 150px;
+  border: 1px solid var(--zinc-300);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--zinc-900);
+}
+
+.field input:focus {
+  outline: 2px solid var(--sky);
+  outline-offset: 1px;
+  border-color: var(--sky);
+}
+
+.field input:disabled {
+  background: var(--zinc-100);
+  color: var(--zinc-500);
 }
 
 .apk-row {
@@ -991,6 +1125,84 @@ button {
 
 .log-msg {
   word-break: break-word;
+}
+
+/* --------------------------------------------------------------------- */
+/* Update popup                                                            */
+/* --------------------------------------------------------------------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(24 24 27 / 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 50;
+}
+
+/* display:flex above would otherwise beat the hidden attribute. */
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.modal {
+  background: #fff;
+  border-radius: var(--radius);
+  box-shadow: 0 10px 15px rgb(24 24 27 / 0.1), 0 4px 6px rgb(24 24 27 / 0.05);
+  padding: 22px 24px 18px;
+  width: min(440px, 100%);
+  animation: modal-in 0.14s ease-out;
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.modal h3 {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.modal p {
+  color: var(--zinc-600);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 8px;
+  white-space: pre-line;
+}
+
+/* Whatever the release said, at the size of a footnote: nobody makes the
+   decision on these, they just want to know what changed. */
+.update-notes {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--zinc-600);
+  background: var(--zinc-100);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin: 12px 0 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.update-warning {
+  color: var(--amber);
+  font-weight: 550;
+}
+
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
 }
 
 /* --------------------------------------------------------------------- */
