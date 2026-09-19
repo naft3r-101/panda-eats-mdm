@@ -158,3 +158,119 @@ test('explainInstallFailure names the signing-key case', () => {
   assert.match(adb.explainInstallFailure('Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: ...]'), /different signing key/);
   assert.equal(adb.explainInstallFailure('Success'), null);
 });
+
+/**
+ * Trimmed from a real `dumpsys user` on an unmanaged onn 7 core tablet
+ * (serial 096226051012491). Nothing is restricted on it - "Device managed" is
+ * false and user 0's effective restrictions are "none" - but the dump still
+ * mentions no_wallpaper five times further down, in the Guest defaults and in
+ * the User types catalogue. That is the whole point of this fixture.
+ */
+const USER_DUMP_UNMANAGED = `
+Current user: 0
+
+Users:
+  UserInfo{0:panda:4c13} serialNo=0 isPrimary=true
+    Type: android.os.usertype.full.SYSTEM
+    Flags: 19475 (ADMIN|FULL|INITIALIZED|MAIN|PRIMARY|SYSTEM)
+    State: RUNNING_UNLOCKED
+    Has profile owner: false
+    Restrictions:
+      none
+    Device policy restrictions:
+      none
+    Effective restrictions:
+      none
+    Can have profile: true
+
+Device properties:
+  Device policy global restrictions:
+    none
+  Guest restrictions:
+    no_sms
+    no_install_unknown_sources
+    no_config_wifi
+    no_config_credentials
+    no_outgoing_calls
+
+  Device managed: false
+
+User types (11 types):
+    android.os.usertype.profile.COMMUNAL:
+        mName: android.os.usertype.profile.COMMUNAL
+        mDefaultRestrictions:
+            no_wallpaper
+    android.os.usertype.profile.CLONE:
+        mDefaultRestrictions:
+            no_bluetooth_sharing
+            no_wallpaper
+    android.os.usertype.full.GUEST:
+        mDefaultRestrictions:
+            no_sms
+            no_outgoing_calls
+`.replace(/\n/g, '\r\n');
+
+/** The same shape with a Device Owner that really has locked things down. */
+const USER_DUMP_MANAGED = `
+Current user: 0
+
+Users:
+  UserInfo{0:panda:4c13} serialNo=0 isPrimary=true
+    Has profile owner: false
+    Restrictions:
+      none
+    Device policy restrictions:
+      no_factory_reset
+      no_wallpaper
+    Effective restrictions:
+      no_factory_reset
+      no_wallpaper
+
+Device properties:
+  Device managed: true
+
+User types (11 types):
+    android.os.usertype.profile.CLONE:
+        mDefaultRestrictions:
+            no_bluetooth_sharing
+            no_wallpaper
+`;
+
+test('parseUserRestrictions reads only what is in force, not the User types catalogue', () => {
+  // The bug this guards: the whole-dump scrape found no_wallpaper here and the
+  // app told the operator an MDM had blocked the wallpaper on a stock tablet.
+  assert.deepEqual(adb.parseUserRestrictions(USER_DUMP_UNMANAGED), []);
+  assert.match(USER_DUMP_UNMANAGED, /no_wallpaper/); // it IS in the dump, just not in force
+
+  assert.deepEqual(adb.parseUserRestrictions(USER_DUMP_MANAGED), ['no_factory_reset', 'no_wallpaper']);
+});
+
+test('parseUserRestrictions falls back to the halves when there is no Effective line', () => {
+  const older = `
+Current user: 0
+
+Users:
+  UserInfo{0:Owner:c13} serialNo=0
+    Restrictions:
+      no_config_wifi
+    Device policy local restrictions:
+      no_wallpaper
+`;
+  assert.deepEqual(adb.parseUserRestrictions(older), ['no_config_wifi', 'no_wallpaper']);
+});
+
+test('parseUserRestrictions ignores users that are not the current one', () => {
+  const twoUsers = `
+Current user: 0
+
+Users:
+  UserInfo{0:panda:4c13} serialNo=0
+    Effective restrictions:
+      none
+  UserInfo{10:work:1010} serialNo=10
+    Effective restrictions:
+      no_wallpaper
+      no_factory_reset
+`;
+  assert.deepEqual(adb.parseUserRestrictions(twoUsers), []);
+});

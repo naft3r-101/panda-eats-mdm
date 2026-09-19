@@ -588,16 +588,75 @@ async function getManagement(serial) {
   // would remove it (no_factory_reset). Reading these is what stops Panda Bench
   // reporting success for an action the platform silently refused.
   const restrictionDump = await shellOut('dumpsys user', { serial });
-  const restrictions = [...new Set((restrictionDump.match(/\bno_[a-z_]+/g) || []))].sort();
+  const restrictions = parseUserRestrictions(restrictionDump);
 
   return {
     deviceOwner: owner ? owner[1] : null,
     profileOwner: profile ? profile[1] : null,
     organizationOwned: /isOrganizationOwnedDevice=true/.test(text),
+    deviceManaged: /^\s*Device managed:\s*true\s*$/m.test(normalise(restrictionDump)),
     factoryResetBlocked: restrictions.includes('no_factory_reset'),
     wallpaperBlocked: restrictions.includes('no_wallpaper'),
     restrictions,
   };
+}
+
+/**
+ * The user restrictions actually in force on the tablet.
+ *
+ * `dumpsys user` prints far more than the active set. Below the users it also
+ * prints a "Guest restrictions" list and a whole "User types" catalogue in
+ * which almost every profile type carries no_wallpaper in its
+ * mDefaultRestrictions - none of it in force on anybody. Scraping the whole
+ * dump for /no_[a-z_]+/ therefore reported no_wallpaper on a stock tablet that
+ * says "Device managed: false" a few lines above, which is how Panda Bench
+ * came to tell operators an MDM had blocked the wallpaper on a tablet that has
+ * no MDM on it at all.
+ *
+ * Only the current user's own block counts. "Effective restrictions" is the
+ * base set and device policy already merged; platforms that predate that line
+ * print the halves separately, so their union is the fallback.
+ */
+function parseUserRestrictions(dump) {
+  const text = normalise(dump);
+  const lines = text.split('\n');
+  const userId = (text.match(/^Current user:\s*(\d+)/m) || [, '0'])[1];
+  const indent = (line) => line.length - line.trimStart().length;
+  const isUserHead = (line) => /^\s*UserInfo\{/.test(line);
+
+  let start = lines.findIndex((l) => new RegExp(`^\\s*UserInfo\\{${userId}:`).test(l));
+  if (start === -1) start = lines.findIndex(isUserHead);
+  if (start === -1) return [];
+  let end = lines.findIndex((l, i) => i > start && isUserHead(l));
+  if (end === -1) end = lines.length;
+  const block = lines.slice(start, end);
+
+  // Everything indented under a "<label>:" heading, stopping at the first line
+  // that is not indented past it. An empty list prints "none".
+  const under = (label) => {
+    const head = new RegExp(`^\\s*${label}:\\s*$`);
+    const out = [];
+    for (let i = 0; i < block.length; i += 1) {
+      if (!head.test(block[i])) continue;
+      for (let j = i + 1; j < block.length; j += 1) {
+        const value = block[j].trim();
+        if (!value || indent(block[j]) <= indent(block[i])) break;
+        if (/^no_[a-z_]+$/.test(value)) out.push(value);
+      }
+    }
+    return out;
+  };
+
+  const effective = under('Effective restrictions');
+  const found = effective.length
+    ? effective
+    : [
+        ...under('Restrictions'),
+        ...under('Device policy restrictions'),
+        ...under('Device policy local restrictions'),
+      ];
+
+  return [...new Set(found)].sort();
 }
 
 /** Which package last set the wallpaper - names the MDM when one owns it. */
@@ -805,16 +864,16 @@ async function launchApp(serial, pkg) {
 
 /**
  * Setting the wallpaper image outright is NOT possible over adb.
- * `cmd wallpaper` exists but only exposes dimming - there is no `set`. The AOSP
- * CROP_AND_SET_WALLPAPER activity resolves on One UI but dies instantly (it is
- * a vestigial stub; Samsung ships its own picker). Both verified on an SM-T227U
- * running Android 14.
+ * `cmd wallpaper` exists but only exposes dimming - there is no `set`. Verified
+ * on an SM-T227U on Android 14 and again on an onn 7 core on Android 14, where
+ * `cmd wallpaper help` still lists nothing but set-dim-amount, dim-with-uid and
+ * get-dim-amount.
  *
  * What DOES work is this three-step dance: push the file, register it with
- * MediaStore so it has a content:// identity, then fire the standard "Set as"
- * intent against that URI with a read grant. The operator taps "Set as
- * wallpaper" and picks home/lock. A file:// URI silently fails at the same
- * step, which is why the MediaStore round trip is not optional.
+ * MediaStore so it has a content:// identity, then open a picker against that
+ * URI with a read grant. The operator taps Set wallpaper and picks home/lock.
+ * A file:// URI silently fails at the same step, which is why the MediaStore
+ * round trip is not optional.
  */
 async function pushFile(serial, localPath, devicePath) {
   return run(['push', localPath, devicePath], { serial, timeout: 300000 });
@@ -835,13 +894,58 @@ async function findMediaId(serial, devicePath) {
   return matches.length ? matches[matches.length - 1][1] : null;
 }
 
+/**
+ * Which intent opens a wallpaper picker, in the order they are tried.
+ *
+ * No single one works everywhere, which is why this is a list rather than a
+ * line. On an onn 7 core (AOSP-ish Android 14) ATTACH_DATA alone is a dead end:
+ * `cmd package query-activities -a android.intent.action.ATTACH_DATA -t
+ * image/png` returns exactly one handler, com.android.contacts'
+ * AttachPhotoActivity. The chooser never appears, `am start` reports success,
+ * and the operator ends up on a screen for setting a CONTACT photo - which is
+ * how "Panda Bench will not set the wallpaper on the onn" looked from the
+ * bench. The same command on a Samsung SM-T227U resolves to One UI's own
+ * "Set as" chooser, where it does work, so ATTACH_DATA stays - last.
+ *
+ * CROP_AND_SET_WALLPAPER is the right intent, and on the onn it is handled by
+ * both com.android.wallpaper and the legacy com.android.wallpapercropper. The
+ * modern one trampolines to WallpaperPreviewActivity and does not crash.
+ *
+ * Both are named as explicit components rather than fired as a bare action, for
+ * two reasons. It skips an "Open with" box between two entries that do the same
+ * job. More importantly, One UI answers that action with a vestigial activity
+ * that resolves and then dies instantly - `am start` would report success and
+ * Samsung tablets would go from working to silently broken. Naming components
+ * means a device that does not have one simply falls through to the next line.
+ */
+const WALLPAPER_INTENTS = [
+  {
+    via: 'the wallpaper picker',
+    args: '-a android.service.wallpaper.CROP_AND_SET_WALLPAPER -n com.android.wallpaper/.picker.StandalonePreviewActivity',
+  },
+  {
+    via: 'the wallpaper cropper',
+    args: '-a android.service.wallpaper.CROP_AND_SET_WALLPAPER -n com.android.wallpapercropper/.WallpaperCropActivity',
+  },
+  { via: 'the "Set as" chooser', args: '-a android.intent.action.ATTACH_DATA' },
+];
+
 async function openSetAsWallpaper(serial, contentUri, mimeType = 'image/png') {
-  const r = await shell(
-    `am start --grant-read-uri-permission -a android.intent.action.ATTACH_DATA -d ${contentUri} -t ${mimeType}`,
-    { serial }
-  );
-  const output = `${r.stdout}\n${r.stderr}`;
-  return { ok: r.ok && !/Error|Unable to resolve/i.test(output), output: output.trim() };
+  let last = '';
+  for (const attempt of WALLPAPER_INTENTS) {
+    const r = await shell(
+      `am start --grant-read-uri-permission ${attempt.args} -d ${contentUri} -t ${mimeType}`,
+      { serial }
+    );
+    const output = `${r.stdout}\n${r.stderr}`.trim();
+    // A missing component prints "Error type 3 ... does not exist"; an action
+    // nothing handles prints "unable to resolve Intent". Both are a miss.
+    if (r.ok && !/Error|Unable to resolve/i.test(output)) {
+      return { ok: true, via: attempt.via, output };
+    }
+    last = output;
+  }
+  return { ok: false, via: null, output: last };
 }
 
 // ---------------------------------------------------------------------------
@@ -1179,6 +1283,7 @@ module.exports = {
   getStorage,
   getAccounts,
   getManagement,
+  parseUserRestrictions,
   getWallpaperOwner,
   getUptimeSeconds,
   getMediaVolume,

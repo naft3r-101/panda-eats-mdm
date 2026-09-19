@@ -1,12 +1,19 @@
 'use strict';
 
-/* Panda Bench renderer. No framework on purpose - this is four screens over an
+/* Panda Bench renderer. No framework on purpose - this is five screens over an
    IPC bridge, and a build step would cost more than it returns.
 
-   The audit and the plan are the same data, on the same tab. One call to
+   The shape of the screen is the shape of the job: set up, tune, check, ship,
+   in that order, one step at a time, each with exactly ONE filled button in the
+   bar at the bottom. Anything that is not part of that line - wallpaper,
+   reboot, power off, rollback, adb, profiles - lives in one of the two menus,
+   because a control used once a month should not sit beside one used forty
+   times a day.
+
+   The audit and the plan are the same data, on the same step. One call to
    bench.preview() returns the audit AND the exact plan Apply would execute,
-   built by the single planner in provision.js; the plan sits above the Apply
-   button and the audit detail below its log. Apply then re-reads the device
+   built by the single planner in provision.js; the plan sits at the top and
+   the audit detail folds away underneath it. Apply then re-reads the device
    again at execution time, so a preview left open for an hour cannot cause a
    stale write. */
 
@@ -18,6 +25,8 @@ const state = {
   busy: false,
   opts: { aggressive: false, skipSettings: false, skipBloat: false, skipAppTuning: false },
   install: {
+    /** 'play' or 'apk' - which of the two install paths step 1 is offering. */
+    source: 'play',
     candidates: [],
     selectedApk: null,
     inspect: null,
@@ -31,6 +40,8 @@ const state = {
     /** The per-tablet checklist and printer address, from state/handover/. */
     handover: null,
   },
+  /** What driftCheck last said about the selected tablet, for the notice strip. */
+  drift: null,
 };
 
 /** Runtime permissions Apply grants, keyed to how they read on screen. */
@@ -54,11 +65,6 @@ function patchMonths(date) {
   if (Number.isNaN(then.getTime())) return null;
   return Math.floor((Date.now() - then.getTime()) / (1000 * 60 * 60 * 24 * 30.44));
 }
-
-/* Which log element progress events land in. Install and Provision each keep
-   their own history so an install does not scroll past under the Provision
-   tab where nobody is looking. */
-let logTarget = 'log';
 
 const $ = (id) => document.getElementById(id);
 
@@ -111,34 +117,44 @@ const tile = (label, value, sub, kind) => `
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // --------------------------------------------------------------------------
-// Tabs
+// Steps
 // --------------------------------------------------------------------------
 
 const tabs = [...document.querySelectorAll('[role="tab"]')];
 
-function selectTab(tab) {
+/** Whichever step is on screen. */
+const currentTab = () => tabs.find((t) => t.getAttribute('aria-selected') === 'true');
+
+/**
+ * Landing on a step fills it in. Nobody should have to press a button to find
+ * out what the step they just opened is about to do, so opening one with
+ * nothing to show reads the tablet instead of waiting to be asked.
+ */
+function selectTab(tab, { focus = true } = {}) {
   for (const t of tabs) {
     const selected = t === tab;
     t.setAttribute('aria-selected', String(selected));
     t.tabIndex = selected ? 0 : -1;
     $(t.getAttribute('aria-controls')).hidden = !selected;
   }
-  tab.focus();
-  // Opening Provision with nothing to show reads the tablet rather than
-  // presenting an Apply button with no idea what it would do.
-  if (tab.id === 'tab-provision' && state.selected && !state.plan && !state.busy) refreshPlan();
-  // Same rule for Verify: opening it with nothing to show reads the tablet.
-  if (tab.id === 'tab-verify' && state.selected && !state.busy) {
+  if (focus) tab.focus();
+  if (!state.selected || state.busy) return;
+
+  if (tab.id === 'tab-provision' && !state.plan) refreshPlan();
+  if (tab.id === 'tab-verify') {
     if (!state.verify.handover) loadHandover().catch(() => {});
     if (!state.verify.report) runVerify();
   }
-  if (tab.id === 'tab-install' && state.selected && !state.busy) {
+  if (tab.id === 'tab-ship') {
+    if (!state.verify.handover) loadHandover().catch(() => {});
+    if (!state.verify.report) runVerify();
+    else renderShip();
+  }
+  if (tab.id === 'tab-install') {
     refreshInstallView().catch(() => {});
     if (state.install.candidates.length === 0) scanApks().catch(() => {});
-    if (state.install.wallpapers.length === 0) loadWallpapers().catch(() => {});
-    renderPatchStatus();
-    renderWallpaperBlock();
   }
+  if (tab.id === 'tab-tools') loadBackups().catch(() => {});
 }
 
 for (const tab of tabs) {
@@ -158,6 +174,113 @@ for (const tab of tabs) {
 }
 
 // --------------------------------------------------------------------------
+// Menus and dialogs
+// --------------------------------------------------------------------------
+
+/**
+ * A menu button and its popover. Built by hand rather than left as a native
+ * control, so it matches the rest of the app and keeps the keyboard behaviour
+ * people expect from one: arrows move, Escape shuts, Tab and a click outside
+ * shut it too, and focus goes back to the button that opened it.
+ */
+for (const menu of document.querySelectorAll('[data-menu]')) {
+  const trigger = menu.querySelector('.menu-trigger');
+  const pop = menu.querySelector('.menu-pop');
+  const items = () => [...pop.querySelectorAll('[role="menuitem"]:not(:disabled)')];
+
+  const close = ({ refocus = false } = {}) => {
+    if (pop.hidden) return;
+    pop.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    if (refocus) trigger.focus();
+  };
+
+  const open = () => {
+    for (const other of document.querySelectorAll('.menu-pop:not([hidden])')) other.hidden = true;
+    for (const other of document.querySelectorAll('.menu-trigger')) other.setAttribute('aria-expanded', 'false');
+    pop.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    const first = items()[0];
+    if (first) first.focus();
+  };
+
+  trigger.addEventListener('click', () => (pop.hidden ? open() : close()));
+
+  menu.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      close({ refocus: true });
+      return;
+    }
+    if (pop.hidden) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        open();
+      }
+      return;
+    }
+    const list = items();
+    const index = list.indexOf(document.activeElement);
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      const next = list[(index + step + list.length) % list.length];
+      if (next) next.focus();
+    }
+    if (event.key === 'Home') list[0] && list[0].focus();
+    if (event.key === 'End') list[list.length - 1] && list[list.length - 1].focus();
+    if (event.key === 'Tab') close();
+  });
+
+  // A menu item does its job and then gets out of the way.
+  pop.addEventListener('click', (event) => {
+    if (event.target.closest('[role="menuitem"]')) close();
+  });
+
+  document.addEventListener('mousedown', (event) => {
+    if (!menu.contains(event.target)) close();
+  });
+}
+
+/** The dialog stack: what to give focus back to when each one shuts. */
+const dialogReturn = new Map();
+
+function openDialog(id) {
+  dialogReturn.set(id, document.activeElement);
+  $(id).hidden = false;
+  const focusable = $(id).querySelectorAll('button:not([hidden]):not(:disabled), input, [tabindex="0"]');
+  if (focusable.length) focusable[0].focus();
+}
+
+function closeDialog(id) {
+  $(id).hidden = true;
+  const back = dialogReturn.get(id);
+  if (back && document.contains(back)) back.focus();
+  dialogReturn.delete(id);
+}
+
+/** Escape shuts a dialog, Tab stays inside it, and the dimmed area is a No. */
+function wireDialog(id) {
+  const root = $(id);
+  root.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeDialog(id);
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = [...root.querySelectorAll('button, input')].filter((el) => !el.hidden && !el.disabled);
+    if (focusable.length === 0) return;
+    const edge = event.shiftKey ? focusable[0] : focusable[focusable.length - 1];
+    if (document.activeElement === edge) {
+      event.preventDefault();
+      (event.shiftKey ? focusable[focusable.length - 1] : focusable[0]).focus();
+    }
+  });
+  root.addEventListener('mousedown', (event) => {
+    if (event.target === root) closeDialog(id);
+  });
+}
+
+// --------------------------------------------------------------------------
 // Option switches - every flip re-plans against the real tablet
 // --------------------------------------------------------------------------
 
@@ -165,23 +288,49 @@ for (const sw of document.querySelectorAll('.switch')) {
   sw.addEventListener('click', () => {
     if (state.busy) return;
 
-    // Install-tab switches carry data-iopt and do not touch the provisioning plan.
+    // Step 1 switches carry data-iopt and do not touch the provisioning plan.
     const installKey = sw.dataset.iopt;
     if (installKey) {
       state.install.opts[installKey] = !state.install.opts[installKey];
       sw.setAttribute('aria-checked', String(state.install.opts[installKey]));
+      renderFoldSummaries();
       return;
     }
 
     const key = sw.dataset.opt;
     state.opts[key] = !state.opts[key];
     sw.setAttribute('aria-checked', String(state.opts[key]));
+    renderFoldSummaries();
 
     // Aggressive changes which packages are even candidates, so the device has
     // to be re-read. The skip toggles only re-filter what we already know.
     if (key === 'aggressive') refreshPlan();
     else applyPlanFromReport();
   });
+}
+
+/**
+ * What each folded-away options block says while it is shut.
+ *
+ * The switches are behind a fold so the ordinary run shows none of them, which
+ * only works if the shut fold still admits when something is turned on.
+ */
+function renderFoldSummaries() {
+  const install = state.install.opts;
+  const installOn = [
+    install.grantPermissions ? 'grant permissions' : null,
+    install.tune ? 'tune background' : null,
+    install.launch ? 'launch after' : null,
+  ].filter(Boolean);
+  $('installOptionsSummary').textContent = installOn.length ? installOn.join(', ') : 'all off';
+
+  const plan = [
+    state.opts.aggressive ? 'aggressive tier' : null,
+    state.opts.skipSettings ? 'settings skipped' : null,
+    state.opts.skipBloat ? 'debloat skipped' : null,
+    state.opts.skipAppTuning ? 'app tuning skipped' : null,
+  ].filter(Boolean);
+  $('planOptionsSummary').textContent = plan.length ? plan.join(', ') : 'the standard counter profile';
 }
 
 // --------------------------------------------------------------------------
@@ -223,8 +372,8 @@ function selectDevice(serial) {
 
   const device = state.devices.find((d) => d.serial === serial);
   $('deviceTitle').textContent = device ? device.model || device.serial : 'No tablet selected';
-  $('deviceSubtitle').textContent = device
-    ? `${device.serial}${device.product ? ` · ${device.product}` : ''}`
+  $('deviceSubtitle').innerHTML = device
+    ? `<span class="serial">${esc(device.serial)}</span>${device.product ? ` · ${esc(device.product)}` : ''}`
     : 'Plug a tablet in over USB and accept the debugging prompt on its screen.';
 
   state.install.inspect = null;
@@ -232,25 +381,26 @@ function selectDevice(serial) {
   state.verify.report = null;
   state.verify.handover = null;
 
-  $('managedBanner').innerHTML = '';
+  state.drift = null;
   $('auditBody').innerHTML = '<p class="empty">Reading the tablet...</p>';
-  $('discoverBody').innerHTML = '<p class="empty">Run a scan to see what this tablet ships that the profiles do not cover.</p>';
+  $('discoverBody').innerHTML = '<p class="empty">Scan to see what this tablet ships that the profiles do not cover.</p>';
   $('verifyBody').innerHTML = '<p class="empty">Check readiness to see whether this tablet can take an order right now.</p>';
   $('checklistBody').innerHTML = '';
   $('installedApps').innerHTML = '';
   $('installSelected').innerHTML = '';
   renderPlan(null);
   renderDevices();
+  renderNotices();
+  renderShip();
   setBusy(state.busy);
   loadBackups().catch(() => {});
   loadHandover().catch(() => {});
   showDrift(serial);
 
-  // If the operator is already looking at Provision or Verify, fill it in immediately.
-  const onProvision = $('tab-provision').getAttribute('aria-selected') === 'true';
-  if (onProvision) refreshPlan();
-  const onVerify = $('tab-verify').getAttribute('aria-selected') === 'true';
-  if (onVerify) runVerify();
+  // Fill in whichever step is already on screen, without stealing focus from
+  // the device button the operator just clicked.
+  const tab = currentTab();
+  if (tab) selectTab(tab, { focus: false });
 }
 
 /** "9/15/2026" in the operator's own format. */
@@ -266,40 +416,80 @@ const shortDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-US') : nu
  * provisioned, where nobody would think to run an audit at all.
  */
 async function showDrift(serial) {
-  const chipEl = $('driftChip');
-  const recordEl = $('recordChip');
-  chipEl.hidden = true;
-  recordEl.hidden = true;
   try {
     const drift = await call(window.bench.driftCheck, serial);
     // The operator may have clicked another tablet while this was reading.
     if (state.selected !== serial) return;
+    state.drift = drift;
+  } catch {
+    // A tablet that cannot answer three reads has a bigger problem than a dim
+    // screen, and the device list and adb footer already say so.
+    state.drift = null;
+  }
+  renderNotices();
+}
 
-    // What the tablet says about itself. A tablet with no record has never
-    // been through this tool, which is worth knowing before anything else.
-    const record = drift.record;
-    if (record && record.provisionedAt) {
-      const stale = record.profile && drift.profile && record.profile !== drift.profile;
-      recordEl.textContent = `Provisioned ${shortDate(record.provisionedAt)}${
-        record.benchVersion ? ` with v${record.benchVersion}` : ''
-      }${record.shippedAt ? `, shipped ${shortDate(record.shippedAt)}` : ''}${stale ? ' - profile has changed since' : ''}`;
-    } else {
-      recordEl.textContent = 'Never provisioned by Panda Bench';
-    }
-    recordEl.hidden = false;
+/**
+ * The strip under the tablet's name: everything about THIS tablet that outranks
+ * whichever step you happen to be on. It is the only place a warning appears
+ * outside a step, so there is exactly one place to look.
+ */
+function renderNotices() {
+  const host = $('notices');
+  const out = [];
 
+  const notice = (kind, mark, html) =>
+    `<div class="notice ${kind}"><span class="notice-mark" aria-hidden="true">${mark}</span><span>${html}</span></div>`;
+
+  // Another MDM owning the tablet outranks everything this tool does.
+  const mgmt = state.report && state.report.device && state.report.device.management;
+  if (mgmt && mgmt.managed) {
+    out.push(
+      notice(
+        'bad',
+        '!',
+        `<strong>${esc(mgmt.deviceOwner || mgmt.profileOwner)}</strong> is the ${
+          mgmt.deviceOwner ? 'Device Owner' : 'Profile Owner'
+        } of this tablet${
+          mgmt.organizationOwned ? ', and it is flagged organization-owned' : ''
+        }. It outranks adb and can undo anything Panda Bench changes. See the audit on step 2.`
+      )
+    );
+  }
+
+  const drift = state.drift;
+  if (drift) {
     const problems = [];
     if (!drift.brightnessOk) problems.push(`screen at ${drift.percent}%`);
     if (drift.adaptiveOn) problems.push('adaptive brightness on');
     if (!drift.volumeOk) problems.push(`media volume ${drift.mediaVolume.current} of ${drift.mediaVolume.max}`);
-    if (problems.length === 0) return;
+    if (problems.length) {
+      out.push(notice('warn', '!', `Not counter-ready: ${esc(problems.join(', '))}. Apply on step 2 fixes it.`));
+    }
 
-    chipEl.textContent = `Not counter-ready: ${problems.join(', ')}. Apply fixes it.`;
-    chipEl.hidden = false;
-  } catch {
-    // A tablet that cannot answer three reads has a bigger problem than a dim
-    // screen, and the device list and adb footer already say so.
+    // What the tablet says about itself. A tablet with no record has never been
+    // through this tool, which is worth knowing before anything else.
+    const record = drift.record;
+    if (record && record.provisionedAt) {
+      const stale = record.profile && drift.profile && record.profile !== drift.profile;
+      out.push(
+        notice(
+          stale ? 'warn' : '',
+          '·',
+          `Provisioned ${esc(shortDate(record.provisionedAt))}${
+            record.benchVersion ? ` with v${esc(record.benchVersion)}` : ''
+          }${record.shippedAt ? `, shipped ${esc(shortDate(record.shippedAt))}` : ''}${
+            stale ? '. The profile has changed since.' : ''
+          }`
+        )
+      );
+    } else {
+      out.push(notice('', '·', 'Never provisioned by Panda Bench.'));
+    }
   }
+
+  host.innerHTML = out.join('');
+  host.hidden = out.length === 0;
 }
 
 async function refreshDevices() {
@@ -326,10 +516,18 @@ async function refreshDevices() {
         setBusy(false);
       }
     }
-  } catch {
-    // adb missing or unhappy; the footer already says so
+  } catch (err) {
+    // A failure here used to be completely silent, which looks exactly like a
+    // tablet that is not plugged in. Say it once rather than never.
+    if (deviceListError !== err.message) {
+      deviceListError = err.message;
+      logLine({ level: 'error', message: `Could not list tablets: ${err.message}` });
+    }
   }
 }
+
+/** The last listing failure, so a poll every four seconds says it once. */
+let deviceListError = null;
 
 // --------------------------------------------------------------------------
 // Busy state
@@ -338,37 +536,53 @@ async function refreshDevices() {
 function setBusy(busy) {
   state.busy = busy;
   const ready = Boolean(state.selected) && !busy;
-  $('runDiscover').disabled = !ready;
-  $('loadBackups').disabled = !ready;
+
+  // Step 2
   $('refreshPlan').disabled = !ready;
   $('runApply').disabled = !ready || !state.plan || state.plan.total === 0;
 
+  // Step 1. One button, and what it says depends on where the app is coming
+  // from - a Play install and a sideload are the same decision, not two.
   const chosen = state.install.selectedApk;
   const present = state.install.inspect && state.install.inspect.present;
-  $('openPlay').disabled = !ready;
+  const fromPlay = state.install.source === 'play';
+  $('runInstall').textContent = fromPlay
+    ? 'Open Play listing on tablet'
+    : chosen && chosen.ok
+      ? `Install ${chosen.applicationId || 'this APK'}`
+      : 'Install';
+  $('runInstall').disabled = !ready || (!fromPlay && !(chosen && chosen.ok));
+  $('installHint').textContent = fromPlay
+    ? 'Play cannot be driven remotely: the tablet needs a Google account signed in, and someone taps Install on its screen.'
+    : 'Sideloading skips Play, so the app will only ever change when you sideload a new build over USB.';
   $('chooseApk').disabled = busy;
   $('rescanApks').disabled = busy;
-  $('runInstall').disabled = !ready || !chosen || !chosen.ok;
   $('launchAppBtn').disabled = !ready || !present || present.length === 0;
-  const wallpaperLocked = Boolean(
-    state.report && state.report.device && state.report.device.management && state.report.device.management.wallpaperBlocked
-  );
-  $('setWallpaper').disabled = !ready || !state.install.selectedWallpaper || wallpaperLocked;
-  $('setWallpaper').textContent = wallpaperLocked ? 'Blocked by device policy' : 'Send to tablet';
-  $('chooseWallpaper').disabled = busy;
-  $('openUpdate').disabled = !ready;
-  $('rebootDevice').disabled = !ready;
-  $('powerOffDevice').disabled = !ready;
-  $('disableSelected').disabled = !ready || discoverPicked.size === 0;
-  $('disableSelected').textContent =
-    discoverPicked.size === 0 ? 'Disable selected' : `Disable ${plural(discoverPicked.size, 'package')}`;
 
+  // Step 3
   $('runVerify').disabled = !ready;
   $('printerHost').disabled = !state.selected || busy;
   $('printSlip').disabled = !ready || !$('printerHost').value.trim();
   const verified = state.verify.report;
   $('launchFromVerify').disabled = !ready || !verified || verified.apps.length === 0;
+
+  // Step 4
   $('shipDevice').disabled = !ready || !verified;
+
+  // Rollback and cleanup
+  $('runDiscover').disabled = !ready;
+  $('disableSelected').disabled = !ready || discoverPicked.size === 0;
+  $('disableSelected').textContent =
+    discoverPicked.size === 0 ? 'Disable selected' : `Disable ${plural(discoverPicked.size, 'package')}`;
+
+  // The tablet menu, and the wallpaper dialog it opens
+  $('tabletMenu').disabled = !ready;
+  const wallpaperLocked = Boolean(
+    state.report && state.report.device && state.report.device.management && state.report.device.management.wallpaperBlocked
+  );
+  $('setWallpaper').disabled = !ready || !state.install.selectedWallpaper || wallpaperLocked;
+  $('setWallpaper').textContent = wallpaperLocked ? 'Blocked on this tablet' : 'Send to tablet';
+  $('chooseWallpaper').disabled = busy;
 
   for (const el of document.querySelectorAll('.revert-btn')) el.disabled = !ready;
   for (const el of document.querySelectorAll('.pick-row.check')) el.disabled = busy || !state.selected;
@@ -571,10 +785,11 @@ function renderAudit(report) {
       ? '-'
       : `${device.brightness.current} of ${device.brightness.max} (${Math.round((device.brightness.current / device.brightness.max) * 100)}%)`;
 
-  // Another MDM owning the device outranks everything this tool does, so it is
-  // the first thing on the page rather than a footnote.
+  // Another MDM owning the device outranks everything this tool does, so the
+  // notice strip under the tablet's name says so on every step. This is the
+  // long version, kept next to the evidence.
   const mgmt = device.management || {};
-  const managedBanner = mgmt.managed
+  const managedCard = mgmt.managed
     ? `<div class="card">
          <div class="card-head"><h3>This tablet is managed by another MDM</h3><span class="count">${esc(mgmt.deviceOwner ? 'device owner' : 'profile owner')}</span></div>
          <div class="alert danger">
@@ -597,8 +812,6 @@ function renderAudit(report) {
          </div>
        </div>`
     : '';
-
-  $('managedBanner').innerHTML = managedBanner;
 
   const info = `
     <div class="card">
@@ -714,7 +927,7 @@ function renderAudit(report) {
     .join('');
 
   const held = report.aggressiveHeld.length
-    ? `<p class="card-note">${report.aggressiveHeld.length} further package(s) are held back by the aggressive tier. Turn on Aggressive in Provision to include them.</p>`
+    ? `<p class="card-note">${report.aggressiveHeld.length} further package(s) are held back by the aggressive tier. Turn on the aggressive tier under "What to change" to include them.</p>`
     : '';
 
   const bloatCard = `
@@ -724,20 +937,31 @@ function renderAudit(report) {
       ${held}
     </div>`;
 
-  $('auditBody').innerHTML = info + appCard + settingsCard + bloatCard;
-  renderPatchStatus();
+  $('auditBody').innerHTML = managedCard + info + appCard + settingsCard + bloatCard;
+  renderNotices();
   renderWallpaperBlock();
   setBusy(state.busy);
 }
 
 // --------------------------------------------------------------------------
-// Provision
+// The log
 // --------------------------------------------------------------------------
+
+/* One log for the whole bench rather than one per step. Four separate logs
+   meant the answer to "what just happened" depended on which tab you were on,
+   and each of them cost a Clear button of its own. The drawer is shut until
+   something runs, and the bar keeps the last line visible while it is. */
 
 const BADGES = { ok: '✓', warn: '!', error: '✗', info: '·', done: '✓' };
 
+function setLogOpen(open) {
+  $('logDrawer').hidden = !open;
+  $('logToggle').setAttribute('aria-expanded', String(open));
+  if (open) $('logDrawer').scrollTop = $('logDrawer').scrollHeight;
+}
+
 function logLine({ level, message }) {
-  const host = $(logTarget);
+  const host = $('logDrawer');
   const placeholder = host.querySelector('.empty');
   if (placeholder) placeholder.remove();
   const div = document.createElement('div');
@@ -745,17 +969,25 @@ function logLine({ level, message }) {
   div.innerHTML = `<span class="log-badge">${BADGES[level] || '·'}</span><span class="log-msg">${esc(message)}</span>`;
   host.appendChild(div);
   host.scrollTop = host.scrollHeight;
+  $('logLast').textContent = message;
+
+  // A line only ever arrives because something is running, so the drawer opens
+  // itself the first time one does rather than hiding the run behind a click.
+  if (host.hidden) setLogOpen(true);
 }
 
 window.bench.onProgress(logLine);
 
+$('logToggle').addEventListener('click', () => setLogOpen($('logDrawer').hidden));
+
 $('clearLog').addEventListener('click', () => {
-  $('log').innerHTML = '<p class="empty">Nothing run yet.</p>';
+  $('logDrawer').innerHTML = '<p class="empty">Nothing run yet.</p>';
+  $('logLast').textContent = 'Nothing run yet.';
 });
 
 $('runApply').addEventListener('click', async () => {
   if (!state.selected || !state.plan || state.plan.total === 0) return;
-  logTarget = 'log';
+
   setBusy(true);
   try {
     await call(window.bench.apply, state.selected, { ...state.opts });
@@ -822,11 +1054,13 @@ function renderApkCandidates() {
   const host = $('apkCandidates');
   const { candidates, aapt2 } = state.install;
 
-  $('aapt2Status').textContent = aapt2 ? 'aapt2 found' : 'aapt2 missing - details unavailable';
+  // aapt2 is how the version, id and signature of a file get read. Say so
+  // only when it is missing, because its presence is the normal case.
+  $('aapt2Status').textContent = aapt2 ? '' : 'aapt2 was not found, so version and signing details cannot be read from a file.';
 
   if (candidates.length === 0) {
     host.innerHTML =
-      '<div class="row"><span class="row-key">No APKs found in the order-app build output or your Downloads folder. Use "Choose an APK..." to point at one.</span></div>';
+      '<div class="row"><span class="row-key">No APKs found in the order-app build output or your Downloads folder. Use "Choose a file..." to point at one.</span></div>';
     return;
   }
 
@@ -903,18 +1137,31 @@ function renderSelectedApk(data) {
     </div>`;
 }
 
-$('openPlay').addEventListener('click', async () => {
-  if (!state.selected) return;
-  logTarget = 'installLog';
-  setBusy(true);
-  try {
-    await call(window.bench.openPlay, state.selected, null);
-  } catch (err) {
-    logLine({ level: 'error', message: err.message });
-  } finally {
-    setBusy(false);
+/**
+ * Play or an APK file. Two ways to do one thing, so they are one choice with
+ * one button after it rather than two buttons in two cards that both look like
+ * the thing to press.
+ */
+function renderSource() {
+  for (const btn of document.querySelectorAll('#sourceChoices .choice')) {
+    btn.setAttribute('aria-checked', String(btn.dataset.source === state.install.source));
   }
-});
+  $('apkPicker').hidden = state.install.source !== 'apk';
+  const count = state.install.candidates.length;
+  $('apkSourceNote').textContent = count
+    ? `${plural(count, 'build')} found on this PC. For test builds and tablets with no Google account.`
+    : 'For test builds and tablets with no Google account.';
+  setBusy(state.busy);
+}
+
+for (const btn of document.querySelectorAll('#sourceChoices .choice')) {
+  btn.addEventListener('click', () => {
+    if (state.busy) return;
+    state.install.source = btn.dataset.source;
+    renderSource();
+    if (state.install.source === 'apk' && state.install.candidates.length === 0) scanApks().catch(() => {});
+  });
+}
 
 $('chooseApk').addEventListener('click', async () => {
   try {
@@ -928,7 +1175,6 @@ $('chooseApk').addEventListener('click', async () => {
     renderApkCandidates();
     await refreshInstallView();
   } catch (err) {
-    logTarget = 'installLog';
     logLine({ level: 'error', message: err.message });
   }
 });
@@ -940,12 +1186,27 @@ async function scanApks() {
   state.install.candidates = res.candidates;
   state.install.aapt2 = res.aapt2;
   renderApkCandidates();
+  renderSource();
 }
 
+/** The one button on step 1, doing whichever of the two jobs is selected. */
 $('runInstall').addEventListener('click', async () => {
+  if (!state.selected) return;
+
+  if (state.install.source === 'play') {
+    setBusy(true);
+    try {
+      await call(window.bench.openPlay, state.selected, null);
+    } catch (err) {
+      logLine({ level: 'error', message: err.message });
+    } finally {
+      setBusy(false);
+    }
+    return;
+  }
+
   const chosen = state.install.selectedApk;
-  if (!state.selected || !chosen || !chosen.ok) return;
-  logTarget = 'installLog';
+  if (!chosen || !chosen.ok) return;
   setBusy(true);
   try {
     await call(window.bench.install, state.selected, chosen.path, { ...state.install.opts });
@@ -964,7 +1225,7 @@ $('runInstall').addEventListener('click', async () => {
 $('launchAppBtn').addEventListener('click', async () => {
   const present = state.install.inspect && state.install.inspect.present;
   if (!state.selected || !present || present.length === 0) return;
-  logTarget = 'installLog';
+
   setBusy(true);
   try {
     const r = await call(window.bench.launchApp, state.selected, present[0].pkg);
@@ -974,10 +1235,6 @@ $('launchAppBtn').addEventListener('click', async () => {
   } finally {
     setBusy(false);
   }
-});
-
-$('clearInstallLog').addEventListener('click', () => {
-  $('installLog').innerHTML = '<p class="empty">Nothing run yet.</p>';
 });
 
 // --- Wallpaper -------------------------------------------------------------
@@ -1034,7 +1291,7 @@ $('chooseWallpaper').addEventListener('click', async () => {
 $('setWallpaper').addEventListener('click', async () => {
   const chosen = state.install.selectedWallpaper;
   if (!state.selected || !chosen) return;
-  logTarget = 'installLog';
+  closeDialog('wallpaperModal');
   setBusy(true);
   try {
     await call(window.bench.setWallpaper, state.selected, chosen.path);
@@ -1045,11 +1302,24 @@ $('setWallpaper').addEventListener('click', async () => {
   }
 });
 
-// --- System update ---------------------------------------------------------
+$('openWallpaper').addEventListener('click', () => {
+  if (state.install.wallpapers.length === 0) loadWallpapers().catch(() => {});
+  renderWallpaperBlock();
+  openDialog('wallpaperModal');
+});
+
+$('wallpaperDismiss').addEventListener('click', () => closeDialog('wallpaperModal'));
+wireDialog('wallpaperModal');
 
 /**
- * Say up front when an MDM has locked the wallpaper, rather than letting the
- * operator push an image that Android will silently discard.
+ * Say up front when the wallpaper is locked, rather than letting the operator
+ * push an image that Android will silently discard.
+ *
+ * It names an admin only when the tablet actually has one. The restriction and
+ * an MDM are not the same fact, and this used to print "An MDM has set the
+ * DISALLOW_SET_WALLPAPER restriction" on tablets with no MDM on them, which
+ * sent people looking for an enrolment that did not exist. (The reading itself
+ * was wrong too - see parseUserRestrictions in adb.js.)
  */
 function renderWallpaperBlock() {
   const host = $('wallpaperBlocked');
@@ -1058,30 +1328,25 @@ function renderWallpaperBlock() {
     host.innerHTML = '';
     return;
   }
-  host.innerHTML = `<div class="alert danger">
+  const admin = mgmt.deviceOwner || mgmt.profileOwner;
+  host.innerHTML = `<div class="alert danger plain">
       <span class="alert-mark" aria-hidden="true">!</span>
-      <span>Wallpaper changes are blocked on this tablet. <strong>${esc(mgmt.deviceOwner || 'An MDM')}</strong>
-      has set the <code>DISALLOW_SET_WALLPAPER</code> restriction, which is why the chooser opens, the tap
-      looks like it worked, and nothing changes. Only the device owner can lift it. Sending is disabled
-      until the MDM is removed.</span>
+      <span>${
+        admin
+          ? `Wallpaper changes are blocked on this tablet: <strong>${esc(admin)}</strong> has set the
+             <code>DISALLOW_SET_WALLPAPER</code> restriction. Only the device owner can lift it, so the
+             MDM has to go first.`
+          : `Wallpaper changes are blocked on this tablet. <code>DISALLOW_SET_WALLPAPER</code> is in force
+             on this user, but no device or profile owner is registered, so no MDM is doing it. Set the
+             wallpaper on the tablet itself instead.`
+      } Either way the chooser would open, the tap would look like it worked, and nothing would change -
+      so sending is disabled.</span>
     </div>`;
-}
-
-function renderPatchStatus() {
-  const el = $('patchStatus');
-  const patch = state.report && state.report.device && state.report.device.securityPatch;
-  if (!patch) {
-    el.textContent = 'run an audit to see the patch level';
-    return;
-  }
-  const months = patchMonths(patch);
-  el.textContent = months == null ? patch : `patched ${patch}, about ${months} month(s) old`;
-  el.style.color = months != null && months >= 6 ? 'var(--amber)' : '';
 }
 
 $('openUpdate').addEventListener('click', async () => {
   if (!state.selected) return;
-  logTarget = 'installLog';
+
   setBusy(true);
   try {
     await call(window.bench.openSystemUpdate, state.selected);
@@ -1108,7 +1373,7 @@ $('openUpdate').addEventListener('click', async () => {
  */
 async function powerAction(fn, verb) {
   if (!state.selected) return;
-  logTarget = 'installLog';
+
   setBusy(true);
   let acted = false;
   try {
@@ -1145,10 +1410,10 @@ const CHECK_CHIP = { ok: ['ok', 'ok'], warn: ['check', 'warn'], bad: ['fix', 'ba
 
 /** Where each red or amber row gets fixed. */
 const FIX_HINTS = {
-  apply: 'Apply on the Provision tab fixes this.',
+  apply: 'Apply on step 2 fixes this.',
   manual: 'On the tablet itself.',
-  launch: 'Use "Open order app on tablet" above.',
-  setup: 'On the Setup tab.',
+  launch: 'Use "Open order app on tablet" below.',
+  setup: 'On step 1.',
 };
 
 async function loadHandover() {
@@ -1208,13 +1473,12 @@ function renderChecklist() {
         state.verify.handover = await call(window.bench.saveHandover, state.selected, { checklist: { [id]: next } });
         renderChecklist();
       } catch (err) {
-        logTarget = 'verifyLog';
         logLine({ level: 'error', message: err.message });
       }
-      renderShipStatus();
+      renderShip();
     });
   }
-  renderShipStatus();
+  renderShip();
   setBusy(state.busy);
 }
 
@@ -1238,7 +1502,7 @@ $('printerHost').addEventListener('input', () => setBusy(state.busy));
 $('printSlip').addEventListener('click', async () => {
   const host = $('printerHost').value.trim();
   if (!state.selected || !host) return;
-  logTarget = 'verifyLog';
+
   setBusy(true);
   try {
     await call(window.bench.printTestSlip, state.selected, host);
@@ -1267,7 +1531,7 @@ async function runVerify() {
   } finally {
     $('runVerify').textContent = 'Check readiness';
     setBusy(false);
-    renderShipStatus();
+    renderShip();
   }
 }
 
@@ -1335,7 +1599,7 @@ function renderVerify(report) {
         report.usbDebugging === false ? '' : ' - Ship turns it off'
       }.`
     );
-  renderShipStatus();
+  renderShip();
 }
 
 /** What Ship would have to admit to. */
@@ -1355,17 +1619,70 @@ function shipUnmet() {
   return unmet;
 }
 
-function renderShipStatus() {
-  const el = $('shipStatus');
-  if (!state.verify.report) {
-    el.textContent = 'check readiness first';
-    el.style.color = '';
+/**
+ * Step 4. It used to be a card at the bottom of the readiness page, under
+ * everything else, which is the wrong place for the last irreversible act of a
+ * bench run. Its own step says the outstanding list out loud instead.
+ */
+function renderShip() {
+  const host = $('shipBody');
+  const button = $('shipDevice');
+
+  if (!state.selected) {
+    host.innerHTML = '<p class="empty">Select a tablet.</p>';
+    button.textContent = 'Ship tablet';
     return;
   }
+  if (!state.verify.report) {
+    host.innerHTML =
+      '<p class="empty">Check readiness on step 3 first. Ship writes those results into the tablet\'s own record, so it needs them.</p>';
+    button.textContent = 'Ship tablet';
+    return;
+  }
+
   const unmet = shipUnmet();
-  el.textContent = unmet.length === 0 ? 'ready to ship' : `${plural(unmet.length, 'thing')} outstanding`;
-  el.style.color = unmet.length === 0 ? 'var(--emerald)' : 'var(--amber)';
+  const report = state.verify.report;
+  button.textContent = unmet.length === 0 ? 'Ship tablet' : `Ship anyway, ${plural(unmet.length, 'thing')} outstanding`;
+
+  const rows = unmet.length
+    ? `<div class="rows">${unmet
+        .map((label) => `<div class="row check-row">${chip('outstanding', 'warn')}<span class="row-key">${esc(label)}</span></div>`)
+        .join('')}</div>`
+    : '';
+
+  host.innerHTML = `
+    <div class="tiles">
+      ${tile(
+        'Readiness',
+        report.ready ? 'Ready' : 'Not ready',
+        report.ready ? 'can take an order now' : 'red rows on step 3',
+        report.ready ? 'good' : 'bad'
+      )}
+      ${tile(
+        'Outstanding',
+        String(unmet.length),
+        unmet.length === 0 ? 'nothing left' : 'named in the record',
+        unmet.length === 0 ? 'good' : 'warn'
+      )}
+      ${tile('USB debugging', report.usbDebugging === false ? 'Off' : 'On', report.usbDebugging === false ? 'already off' : 'Ship turns it off', 'good')}
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h3>${unmet.length === 0 ? 'Ready to hand over' : 'Still outstanding'}</h3>
+        <span class="count">${esc(report.device.model || report.device.serial)}</span>
+      </div>
+      ${
+        rows ||
+        '<p class="card-note">Every automatic check passed and every by-hand item is ticked. Shipping writes that into the tablet and turns USB debugging off.</p>'
+      }
+      ${
+        rows
+          ? '<p class="card-note">Shipping does not pretend these are done. Each one is written into the tablet\'s record as outstanding, and Panda Bench asks you to confirm first.</p>'
+          : ''
+      }
+    </div>`;
 }
+
 
 $('runVerify').addEventListener('click', () => runVerify());
 
@@ -1373,7 +1690,7 @@ $('launchFromVerify').addEventListener('click', async () => {
   const report = state.verify.report;
   if (!state.selected || !report || report.apps.length === 0) return;
   const pkg = report.prod ? report.prod.pkg : report.apps[0].pkg;
-  logTarget = 'verifyLog';
+
   setBusy(true);
   try {
     const r = await call(window.bench.launchApp, state.selected, pkg);
@@ -1392,7 +1709,7 @@ $('launchFromVerify').addEventListener('click', async () => {
  */
 $('shipDevice').addEventListener('click', async () => {
   if (!state.selected || !state.verify.report) return;
-  logTarget = 'verifyLog';
+
   setBusy(true);
   let acted = false;
   try {
@@ -1409,7 +1726,7 @@ $('shipDevice').addEventListener('click', async () => {
     state.report = null;
     state.plan = null;
     renderPlan(null);
-    renderShipStatus();
+    renderShip();
     setBusy(false);
     await refreshDevices();
   }
@@ -1485,7 +1802,7 @@ $('runDiscover').addEventListener('click', async () => {
 
 $('disableSelected').addEventListener('click', async () => {
   if (!state.selected || discoverPicked.size === 0) return;
-  logTarget = 'discoverLog';
+
   setBusy(true);
   try {
     await call(window.bench.disablePackages, state.selected, [...discoverPicked]);
@@ -1536,7 +1853,6 @@ async function loadBackups() {
 
   for (const btn of $('rollbackBody').querySelectorAll('.revert-btn')) {
     btn.addEventListener('click', async () => {
-      logTarget = 'log';
       setBusy(true);
       selectTab($('tab-provision'));
       try {
@@ -1551,7 +1867,6 @@ async function loadBackups() {
   }
 }
 
-$('loadBackups').addEventListener('click', () => loadBackups().catch(() => {}));
 $('openState').addEventListener('click', () => window.bench.openStateFolder());
 $('openProfiles').addEventListener('click', () => window.bench.openProfilesFolder());
 $('refresh').addEventListener('click', () => refreshDevices());
@@ -1583,7 +1898,6 @@ const update = {
   deferred: false,
   /** state+version already popped, so a download does not pop twice over. */
   announced: new Set(),
-  lastFocus: null,
 };
 
 /** Title, body and buttons for whatever the updater last reported. */
@@ -1644,23 +1958,18 @@ function renderUpdate() {
 
   $('updateDismiss').textContent = copy.action ? 'Later' : 'Close';
 
-  // The sidebar button doubles as the only badge there is.
+  // The menu item doubles as the only badge there is, so a waiting update is
+  // visible on the trigger without opening the menu at all.
   const waiting = status.state === 'available' || status.state === 'downloading' || status.state === 'downloaded';
-  $('checkUpdates').textContent = waiting ? 'Update ready' : 'Updates';
+  $('checkUpdates').textContent = waiting ? 'Update ready - restart to install' : 'Check for updates';
+  $('benchMenu').firstChild.textContent = waiting ? 'Bench settings · update ready ' : 'Bench settings ';
 }
 
 function openUpdateModal() {
-  update.lastFocus = document.activeElement;
-  $('updateModal').hidden = false;
   renderUpdate();
+  openDialog('updateModal');
   const action = $('updateAction');
   (action.hidden || action.disabled ? $('updateDismiss') : action).focus();
-}
-
-function closeUpdateModal() {
-  $('updateModal').hidden = true;
-  if (update.lastFocus && document.contains(update.lastFocus)) update.lastFocus.focus();
-  update.lastFocus = null;
 }
 
 const updateModalOpen = () => !$('updateModal').hidden;
@@ -1690,7 +1999,7 @@ $('checkUpdates').addEventListener('click', async () => {
   }
 });
 
-$('updateDismiss').addEventListener('click', closeUpdateModal);
+$('updateDismiss').addEventListener('click', () => closeDialog('updateModal'));
 
 $('updateAction').addEventListener('click', async () => {
   try {
@@ -1700,28 +2009,10 @@ $('updateAction').addEventListener('click', async () => {
   }
 });
 
-/* Escape closes it, and Tab stays inside it: the popup can appear over a run
-   and must not become a place the keyboard gets stuck. */
-$('updateModal').addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    closeUpdateModal();
-    return;
-  }
-  if (event.key !== 'Tab') return;
-  const buttons = [$('updateDismiss'), $('updateAction')].filter((b) => !b.hidden && !b.disabled);
-  if (buttons.length === 0) return;
-  const edge = event.shiftKey ? buttons[0] : buttons[buttons.length - 1];
-  if (document.activeElement === edge) {
-    event.preventDefault();
-    (event.shiftKey ? buttons[buttons.length - 1] : buttons[0]).focus();
-  }
-});
-
-/* Clicking the dimmed area behind it is a dismissal, like every other dialog
-   on this PC. */
-$('updateModal').addEventListener('mousedown', (event) => {
-  if (event.target === $('updateModal')) closeUpdateModal();
-});
+/* Escape closes it, Tab stays inside it, and the dimmed area is a dismissal:
+   the popup can appear over a run and must not become a place the keyboard
+   gets stuck. */
+wireDialog('updateModal');
 
 // --------------------------------------------------------------------------
 // Boot
@@ -1764,8 +2055,21 @@ async function showUpdateStatus() {
   }
 }
 
+/* A renderer exception used to leave a screen that simply never filled in, with
+   nothing anywhere to say why. The log is where things that went wrong go. */
+window.addEventListener('error', (event) =>
+  logLine({ level: 'error', message: `Panda Bench hit an error: ${event.message}` })
+);
+window.addEventListener('unhandledrejection', (event) =>
+  logLine({ level: 'error', message: `Panda Bench hit an error: ${(event.reason && event.reason.message) || event.reason}` })
+);
+
 showAppVersion();
 showUpdateStatus();
 showAdbStatus();
+renderDevices();
+renderFoldSummaries();
+renderSource();
+renderShip();
 refreshDevices();
 setInterval(refreshDevices, 4000);

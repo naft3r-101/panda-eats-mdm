@@ -1050,23 +1050,29 @@ async function setWallpaper(serial, localPath, onProgress = () => {}) {
     return { ok: false, error: 'File not found' };
   }
 
-  // Refuse rather than theatre. If an MDM has set DISALLOW_SET_WALLPAPER the
+  // Refuse rather than theatre. With DISALLOW_SET_WALLPAPER in force the
   // chooser still opens and the tap still appears to work, but the system
   // silently discards it - so reporting success here would be a lie.
+  //
+  // The owner is named only when there IS one. Saying "an MDM" for a
+  // restriction with no admin behind it sends the operator hunting for an
+  // enrolment that does not exist, which is exactly what this used to do.
   const management = await adb.getManagement(serial);
   if (management.wallpaperBlocked) {
-    const owner = await adb.getWallpaperOwner(serial);
+    const admin = management.deviceOwner || management.profileOwner;
     log(
       'error',
-      `Wallpaper changes are blocked on this tablet. ${
-        management.deviceOwner || 'An MDM'
-      } has set the DISALLOW_SET_WALLPAPER restriction${owner ? `, and ${owner} set the current wallpaper` : ''}.`
+      admin
+        ? `Wallpaper changes are blocked on this tablet: ${admin} has set the DISALLOW_SET_WALLPAPER restriction.`
+        : 'Wallpaper changes are blocked on this tablet. The DISALLOW_SET_WALLPAPER restriction is in force on this user, but no device or profile owner is registered, so it is not an MDM doing it.'
     );
     log(
       'info',
-      'The chooser would still open and the tap would appear to work, but Android discards it. Only the device owner can lift this - remove the MDM first.'
+      admin
+        ? 'The chooser would still open and the tap would appear to work, but Android discards it. Only the device owner can lift this - remove the MDM first.'
+        : 'The chooser would still open and the tap would appear to work, but Android discards it. Set the wallpaper on the tablet itself, from Settings or the Gallery.'
     );
-    return { ok: false, error: 'blocked by device policy', blockedBy: management.deviceOwner || null };
+    return { ok: false, error: 'blocked by device policy', blockedBy: admin || null };
   }
 
   const basename = `panda-wallpaper${path.extname(localPath) || '.png'}`;
@@ -1093,12 +1099,12 @@ async function setWallpaper(serial, localPath, onProgress = () => {}) {
   const uri = `content://media/external/images/media/${mediaId}`;
   const opened = await adb.openSetAsWallpaper(serial, uri, mime);
   if (!opened.ok) {
-    log('warn', `Could not open the chooser. The image is at ${devicePath} - set it from the Gallery by hand.`);
+    log('warn', `No wallpaper picker on this tablet would take the image. It is at ${devicePath} - set it from the Gallery by hand.`);
     return { ok: false, error: 'chooser failed', devicePath };
   }
 
-  log('done', 'The tablet is showing the "Set as" chooser with this image. Tap Set as wallpaper, then choose Home screen.');
-  return { ok: true, devicePath, uri };
+  log('done', `The tablet is showing ${opened.via} with this image. Tap Set wallpaper, then choose Home screen.`);
+  return { ok: true, devicePath, uri, via: opened.via };
 }
 
 // ---------------------------------------------------------------------------

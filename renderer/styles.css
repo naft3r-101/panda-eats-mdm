@@ -1,6 +1,11 @@
 /* Panda Bench - brand tokens mirror the order-taking app's ui/theme/Color.kt:
    zinc for structure, emerald for good, red for bad, sky for info, amber for
-   caution. The brand main colour is black, not blue. */
+   caution. The brand main colour is black, not blue.
+
+   Layout rule the whole file follows: the window is a fixed frame - sidebar,
+   topbar, step rail, action bar - and only the middle scrolls. A button never
+   moves because a list above it got longer, so the one that matters is always
+   in the same place. */
 
 :root {
   --zinc-900: #18181b;
@@ -26,6 +31,7 @@
   --radius: 10px;
   --radius-sm: 7px;
   --shadow: 0 1px 2px rgb(24 24 27 / 0.06), 0 1px 3px rgb(24 24 27 / 0.08);
+  --shadow-pop: 0 10px 24px rgb(24 24 27 / 0.14), 0 2px 6px rgb(24 24 27 / 0.08);
   --font: -apple-system, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   --mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
 }
@@ -44,7 +50,7 @@ body {
   font-family: var(--font);
   font-size: 14px;
   color: var(--zinc-900);
-  background: var(--zinc-50);
+  background: var(--zinc-100);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
@@ -69,8 +75,194 @@ button {
 
 .app {
   display: grid;
-  grid-template-columns: 290px 1fr;
+  grid-template-columns: 250px 1fr;
   height: 100vh;
+}
+
+/* --------------------------------------------------------------------- */
+/* Buttons - three weights and no more                                    */
+/* --------------------------------------------------------------------- */
+
+/* The one thing this screen wants you to do. Exactly one per step. */
+.primary-btn {
+  background: var(--zinc-900);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 20px;
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+
+.primary-btn:hover:not(:disabled) {
+  background: var(--zinc-700);
+}
+
+.primary-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.primary-btn.danger {
+  background: var(--red);
+}
+
+.primary-btn.danger:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+/* Everything else that is still a button. */
+.quiet-btn {
+  background: #fff;
+  border: 1px solid var(--zinc-300);
+  color: var(--zinc-700);
+  border-radius: var(--radius-sm);
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 550;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.quiet-btn:hover:not(:disabled) {
+  background: var(--zinc-100);
+  border-color: var(--zinc-400);
+}
+
+.quiet-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.quiet-btn.danger {
+  border-color: #fca5a5;
+  color: var(--red);
+}
+
+.quiet-btn.danger:hover:not(:disabled) {
+  background: var(--red-bg);
+  border-color: var(--red);
+}
+
+/* A word you can click. Used where a bordered button would be noise. */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--zinc-500);
+  border-radius: 5px;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.link-btn:hover {
+  color: var(--zinc-900);
+  background: var(--zinc-100);
+}
+
+.sidebar .link-btn {
+  color: var(--zinc-400);
+}
+
+.sidebar .link-btn:hover {
+  color: #fff;
+  background: var(--zinc-800);
+}
+
+/* --------------------------------------------------------------------- */
+/* Menus - where the once-a-month controls live                           */
+/* --------------------------------------------------------------------- */
+
+.menu {
+  position: relative;
+}
+
+.menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.caret {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  opacity: 0.6;
+  transition: transform 0.14s ease;
+}
+
+.menu-trigger[aria-expanded="true"] .caret {
+  transform: rotate(180deg);
+}
+
+.menu-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  min-width: 232px;
+  padding: 5px;
+  background: #fff;
+  border: 1px solid var(--zinc-200);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 0.12s ease-out;
+}
+
+.menu-pop.menu-up {
+  top: auto;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: auto;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+.menu-pop[hidden] {
+  display: none;
+}
+
+.menu-pop button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--zinc-800);
+}
+
+.menu-pop button:hover:not(:disabled) {
+  background: var(--zinc-100);
+}
+
+.menu-pop button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.menu-pop button.danger {
+  color: var(--red);
+}
+
+.menu-pop button.danger:hover:not(:disabled) {
+  background: var(--red-bg);
+}
+
+.menu-sep {
+  height: 1px;
+  background: var(--zinc-200);
+  margin: 5px 4px;
 }
 
 /* --------------------------------------------------------------------- */
@@ -89,13 +281,12 @@ button {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 20px 18px;
-  border-bottom: 1px solid var(--zinc-800);
+  padding: 18px 16px;
 }
 
 .brand-mark {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   border-radius: 9px;
   flex: 0 0 auto;
   display: block;
@@ -114,47 +305,6 @@ button {
   margin-top: 1px;
 }
 
-/* The counter-readiness warning under the device name. Amber, not red: the
-   tablet is fine, it just needs an Apply before it goes back on a counter. */
-.drift-chip {
-  display: inline-block;
-  margin-top: 7px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 550;
-  color: var(--amber);
-  background: var(--amber-bg);
-  border: 1px solid rgb(217 119 6 / 0.22);
-}
-
-.drift-chip[hidden] {
-  display: none;
-}
-
-/* What the tablet says about itself: when it was provisioned and shipped.
-   Neutral, because it is a fact rather than a warning. */
-.record-chip {
-  display: inline-block;
-  margin-top: 7px;
-  margin-left: 6px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 550;
-  color: var(--zinc-600);
-  background: var(--zinc-100);
-  border: 1px solid var(--zinc-200);
-}
-
-.record-chip[hidden] {
-  display: none;
-}
-
-.drift-chip[hidden] + .record-chip {
-  margin-left: 0;
-}
-
 .brand-version {
   color: var(--zinc-500);
   font-variant-numeric: tabular-nums;
@@ -165,28 +315,28 @@ button {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 16px 12px 8px;
+  padding: 8px 12px;
 }
 
 .sidebar-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 6px 10px;
+  padding: 0 4px 8px;
 }
 
 .sidebar-heading h2 {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--zinc-400);
+  color: var(--zinc-500);
 }
 
 .devices {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   overflow-y: auto;
   min-height: 0;
 }
@@ -195,12 +345,12 @@ button {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 11px 12px;
+  padding: 10px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: var(--zinc-800);
   color: var(--zinc-100);
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background 0.12s ease;
 }
 
 .device:hover {
@@ -208,25 +358,26 @@ button {
 }
 
 .device[aria-checked="true"] {
-  background: var(--zinc-50);
+  background: #fff;
   color: var(--zinc-900);
-  border-color: var(--zinc-50);
 }
 
 .device-name {
+  display: block;
   font-weight: 600;
   font-size: 13px;
 }
 
 .device-meta {
+  display: block;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--zinc-400);
-  margin-top: 3px;
+  margin-top: 2px;
 }
 
 .device[aria-checked="true"] .device-meta {
-  color: var(--zinc-600);
+  color: var(--zinc-500);
 }
 
 .device-unusable {
@@ -234,25 +385,25 @@ button {
 }
 
 .sidebar .empty {
-  color: var(--zinc-400);
+  color: var(--zinc-500);
   font-size: 12.5px;
-  padding: 10px 6px;
+  padding: 8px 4px;
   line-height: 1.5;
 }
 
-.adb-status {
+.sidebar-foot {
+  padding: 12px;
   border-top: 1px solid var(--zinc-800);
-  padding: 12px 16px 14px;
-  font-size: 11.5px;
-  color: var(--zinc-400);
 }
 
 .adb-line {
   display: flex;
   align-items: center;
   gap: 7px;
+  padding: 0 4px 10px;
   font-family: var(--mono);
   font-size: 10.5px;
+  color: var(--zinc-400);
   word-break: break-all;
   line-height: 1.4;
 }
@@ -268,43 +419,27 @@ button {
 .adb-dot.ok {
   background: var(--emerald);
 }
+
 .adb-dot.bad {
   background: var(--red);
 }
 
-.adb-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.ghost-btn {
+.sidebar-foot .quiet-btn {
+  width: 100%;
+  justify-content: space-between;
   background: transparent;
-  border: 1px solid var(--zinc-300);
-  color: var(--zinc-700);
-  border-radius: var(--radius-sm);
-  padding: 5px 10px;
-  font-size: 12px;
-  font-weight: 500;
-  transition: background 0.12s ease;
-}
-
-.ghost-btn:hover {
-  background: var(--zinc-100);
-}
-
-.sidebar .ghost-btn {
   border-color: var(--zinc-700);
   color: var(--zinc-300);
 }
 
-.sidebar .ghost-btn:hover {
+.sidebar-foot .quiet-btn:hover:not(:disabled) {
   background: var(--zinc-800);
-  color: var(--zinc-50);
+  border-color: var(--zinc-600);
+  color: #fff;
 }
 
 /* --------------------------------------------------------------------- */
-/* Main                                                                   */
+/* Main frame                                                             */
 /* --------------------------------------------------------------------- */
 
 .main {
@@ -312,12 +447,15 @@ button {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  background: #fff;
 }
 
 .topbar {
-  padding: 20px 26px 0;
-  border-bottom: 1px solid var(--zinc-200);
-  background: #fff;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 28px 14px;
 }
 
 .device-title h2 {
@@ -328,130 +466,312 @@ button {
 
 .device-title p {
   color: var(--zinc-500);
-  font-size: 13px;
+  font-size: 12.5px;
   margin-top: 3px;
 }
 
-.tabs {
-  display: flex;
-  gap: 2px;
-  margin-top: 18px;
+/* The serial is the one thing up here that is read character by character. */
+.device-title p .serial {
+  font-family: var(--mono);
 }
 
-.tab {
+/* Things this tablet needs you to know before you touch any step. */
+.notices {
+  padding: 0 28px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notices[hidden] {
+  display: none;
+}
+
+.notice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  line-height: 1.5;
+  background: var(--zinc-100);
+  border: 1px solid var(--zinc-200);
+  color: var(--zinc-700);
+}
+
+.notice strong {
+  font-weight: 650;
+}
+
+.notice.warn {
+  background: var(--amber-bg);
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.notice.bad {
+  background: var(--red-bg);
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
+.notice-mark {
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+/* The four steps of a bench run, plus the drawer of things that are not. */
+.steps {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--zinc-200);
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  padding: 9px 14px;
+  margin-bottom: -1px;
+  padding: 11px 14px 12px;
   font-size: 13.5px;
-  font-weight: 500;
+  font-weight: 550;
   color: var(--zinc-500);
   border-radius: 6px 6px 0 0;
   transition: color 0.12s ease, border-color 0.12s ease;
 }
 
-.tab:hover {
+.step:hover {
   color: var(--zinc-900);
 }
 
-.tab[aria-selected="true"] {
+.step[aria-selected="true"] {
   color: var(--zinc-900);
-  font-weight: 600;
+  font-weight: 650;
   border-bottom-color: var(--zinc-900);
+}
+
+.step-n {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--zinc-100);
+  color: var(--zinc-500);
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.step[aria-selected="true"] .step-n {
+  background: var(--zinc-900);
+  color: #fff;
+}
+
+/* Rollback and cleanup are not part of the line, so they sit off the end. */
+.step-aside {
+  margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  background: var(--zinc-50);
 }
 
 .panel {
   flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 22px 26px 32px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .panel[hidden] {
   display: none;
 }
 
-.panel-actions {
+/* The only thing on the screen that moves. */
+.scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 28px 26px;
+}
+
+/* One filled button, one quiet one, one line of why. Always here. */
+.actionbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 20px;
-}
-
-.primary-btn {
-  background: var(--zinc-900);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 9px 18px;
-  font-size: 13.5px;
-  font-weight: 600;
-  transition: background 0.12s ease, opacity 0.12s ease;
-}
-
-.primary-btn:hover:not(:disabled) {
-  background: var(--zinc-700);
-}
-
-.primary-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.primary-btn.danger {
-  background: var(--red);
-}
-
-.primary-btn.danger:hover:not(:disabled) {
-  background: #b91c1c;
-}
-
-/* A destructive action that is not the primary one on its card: reads as
-   secondary until you look at it, then reads as a warning. */
-.ghost-btn.danger {
-  border-color: var(--red);
-  color: var(--red);
-}
-
-.ghost-btn.danger:hover:not(:disabled) {
-  background: var(--red-bg);
-}
-
-.ghost-btn.danger:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.hint {
-  color: var(--zinc-500);
-  font-size: 12.5px;
-}
-
-/* Divides a panel that holds more than one job: the audit detail under the
-   Apply log, and Rollback above Discover on the Tools tab. */
-.section-head {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--zinc-500);
-  margin: 26px 0 12px;
-  padding-top: 18px;
+  padding: 14px 28px;
+  background: #fff;
   border-top: 1px solid var(--zinc-200);
 }
 
-.panel > .section-head:first-child {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
+.actionbar-hint {
+  flex: 1 1 320px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--zinc-500);
+  line-height: 1.45;
+}
+
+/* --------------------------------------------------------------------- */
+/* Page furniture inside a panel                                          */
+/* --------------------------------------------------------------------- */
+
+.block {
+  margin-bottom: 20px;
+}
+
+.block-head {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--zinc-500);
+  margin-bottom: 10px;
+}
+
+.block-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.inline-note {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--zinc-500);
+  line-height: 1.45;
 }
 
 .empty {
   color: var(--zinc-500);
   font-size: 13.5px;
-  padding: 26px 0;
+  padding: 22px 0;
   line-height: 1.6;
+}
+
+/* Two big targets instead of two buttons in two separate cards. */
+.choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.choice {
+  display: block;
+  text-align: left;
+  padding: 13px 15px;
+  background: #fff;
+  border: 1px solid var(--zinc-200);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.choice:hover {
+  border-color: var(--zinc-400);
+}
+
+.choice[aria-checked="true"] {
+  border-color: var(--zinc-900);
+  box-shadow: 0 0 0 1px var(--zinc-900);
+}
+
+.choice-title {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.choice-note {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--zinc-500);
+  line-height: 1.45;
+}
+
+/* Detail nobody needs on the happy path: options, and the raw audit. */
+.options-fold {
+  background: #fff;
+  border: 1px solid var(--zinc-200);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 18px;
+}
+
+.options-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  list-style: none;
+  border-radius: var(--radius);
+}
+
+.options-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.options-fold > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid var(--zinc-400);
+  transition: transform 0.14s ease;
+}
+
+.options-fold[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.options-fold > summary:hover {
+  background: var(--zinc-50);
+}
+
+.fold-summary {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--zinc-500);
+}
+
+.options-fold .options,
+.options-fold .panel-body {
+  padding: 0 16px 16px;
+}
+
+.options-fold .panel-body > .card:last-child,
+.options-fold .options > *:last-child {
+  margin-bottom: 0;
 }
 
 /* --------------------------------------------------------------------- */
@@ -460,32 +780,32 @@ button {
 
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
-  margin-bottom: 22px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
 }
 
 .tile {
   background: #fff;
   border: 1px solid var(--zinc-200);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 13px 15px;
   box-shadow: var(--shadow);
 }
 
 .tile-label {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10.5px;
+  font-weight: 650;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--zinc-500);
 }
 
 .tile-value {
-  font-size: 25px;
+  font-size: 24px;
   font-weight: 660;
   letter-spacing: -0.02em;
-  margin-top: 6px;
+  margin-top: 5px;
   line-height: 1.1;
 }
 
@@ -510,7 +830,7 @@ button {
   border: 1px solid var(--zinc-200);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  margin-bottom: 18px;
+  margin-bottom: 14px;
   overflow: hidden;
 }
 
@@ -519,9 +839,8 @@ button {
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding: 13px 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--zinc-200);
-  background: var(--zinc-50);
 }
 
 .card-head h3 {
@@ -532,31 +851,31 @@ button {
 .card-head .count {
   font-size: 12px;
   color: var(--zinc-500);
+  text-align: right;
 }
 
 .card-body {
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 .card-note {
-  padding: 12px 16px;
+  padding: 11px 16px;
   font-size: 12.5px;
   color: var(--zinc-600);
   line-height: 1.55;
-  border-top: 1px solid var(--zinc-200);
+  border-top: 1px solid var(--zinc-100);
   background: var(--zinc-50);
 }
 
-.card-foot {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 12px 16px;
-  border-top: 1px solid var(--zinc-200);
+.rows-boxed {
+  background: #fff;
+  border: 1px solid var(--zinc-200);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
 
-/* A warning that must not be skimmed past - used when an install would replace
-   a paired production build. */
+/* A warning that must not be skimmed past. */
 .alert {
   display: flex;
   gap: 10px;
@@ -576,6 +895,10 @@ button {
   color: #991b1b;
 }
 
+.alert.plain {
+  margin: 0 0 14px;
+}
+
 .alert-mark {
   font-weight: 700;
   flex: 0 0 auto;
@@ -583,9 +906,11 @@ button {
 
 .wallpapers {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 10px;
-  padding: 14px 16px;
+  margin-top: 14px;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .wallpaper {
@@ -602,7 +927,7 @@ button {
   border-color: var(--zinc-400);
 }
 
-.wallpaper[aria-checked='true'] {
+.wallpaper[aria-checked="true"] {
   border-color: var(--zinc-900);
 }
 
@@ -651,13 +976,13 @@ button {
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 
-.pick-row[aria-checked='true'] .pick-box {
+.pick-row[aria-checked="true"] .pick-box {
   background: var(--red);
   border-color: var(--red);
 }
 
-.pick-row[aria-checked='true'] .pick-box::after {
-  content: '';
+.pick-row[aria-checked="true"] .pick-box::after {
+  content: "";
   position: absolute;
   left: 4.5px;
   top: 1px;
@@ -668,7 +993,7 @@ button {
   transform: rotate(45deg);
 }
 
-.pick-row[aria-checked='true'] .row-key {
+.pick-row[aria-checked="true"] .row-key {
   color: var(--red);
   font-weight: 600;
 }
@@ -683,12 +1008,12 @@ button {
   margin-top: 2px;
 }
 
-.pick-row.check[aria-checked='true'] .pick-box {
+.pick-row.check[aria-checked="true"] .pick-box {
   background: var(--emerald);
   border-color: var(--emerald);
 }
 
-.pick-row.check[aria-checked='true'] .row-key {
+.pick-row.check[aria-checked="true"] .row-key {
   color: var(--zinc-900);
   font-weight: 500;
 }
@@ -706,7 +1031,7 @@ button {
   line-height: 1.45;
 }
 
-.pick-row.check[aria-checked='true'] .check-note {
+.pick-row.check[aria-checked="true"] .check-note {
   color: var(--zinc-400);
 }
 
@@ -732,8 +1057,8 @@ button {
   font-style: italic;
 }
 
-/* The printer address on the Verify tab. A text input is fine here; it is the
-   dropdowns and pickers that must never be left native. */
+/* A text input is fine here; it is the dropdowns and pickers that must never
+   be left native. */
 .field {
   display: inline-flex;
   align-items: center;
@@ -746,7 +1071,7 @@ button {
   font: inherit;
   font-family: var(--mono);
   font-size: 12.5px;
-  padding: 6px 9px;
+  padding: 8px 10px;
   width: 150px;
   border: 1px solid var(--zinc-300);
   border-radius: var(--radius-sm);
@@ -780,7 +1105,7 @@ button {
   background: var(--zinc-50);
 }
 
-.apk-row[aria-checked='true'] {
+.apk-row[aria-checked="true"] {
   background: var(--zinc-100);
   box-shadow: inset 3px 0 0 var(--zinc-900);
 }
@@ -863,7 +1188,7 @@ button {
    narrow minimum packed seven columns onto a wide window. */
 .info-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(205px, 1fr));
   gap: 8px;
   padding: 14px 16px;
   margin: 0;
@@ -874,7 +1199,7 @@ button {
      id or a package name overflows its track and lands on top of the next
      cell. This is the line that stops that. */
   min-width: 0;
-  padding: 10px 12px;
+  padding: 9px 11px;
   background: var(--zinc-50);
   border: 1px solid var(--zinc-100);
   border-radius: 8px;
@@ -889,7 +1214,7 @@ button {
 }
 
 .info-cell dd {
-  margin: 5px 0 0;
+  margin: 4px 0 0;
   font-size: 13px;
   font-weight: 550;
   line-height: 1.35;
@@ -903,7 +1228,7 @@ button {
 /* --------------------------------------------------------------------- */
 
 .plan-host {
-  margin-bottom: 20px;
+  margin-bottom: 4px;
 }
 
 .plan-host > .empty {
@@ -924,7 +1249,7 @@ button {
   gap: 8px;
   padding: 12px 16px 6px;
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: 650;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--zinc-500);
@@ -994,10 +1319,12 @@ button {
 /* Switches                                                               */
 /* --------------------------------------------------------------------- */
 
+/* Two columns once there is room, so a wide window fills with switches rather
+   than with four very long bars and a lot of nothing. */
 .options {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
   gap: 8px;
-  margin-bottom: 22px;
 }
 
 .switch {
@@ -1009,7 +1336,7 @@ button {
   background: #fff;
   border: 1px solid var(--zinc-200);
   border-radius: var(--radius);
-  padding: 12px 14px;
+  padding: 11px 13px;
   transition: border-color 0.12s ease, background 0.12s ease;
 }
 
@@ -1023,8 +1350,8 @@ button {
 }
 
 .switch-track {
-  width: 36px;
-  height: 21px;
+  width: 34px;
+  height: 20px;
   border-radius: 999px;
   background: var(--zinc-300);
   flex: 0 0 auto;
@@ -1037,8 +1364,8 @@ button {
   position: absolute;
   top: 2.5px;
   left: 2.5px;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 2px rgb(24 24 27 / 0.25);
@@ -1050,13 +1377,13 @@ button {
 }
 
 .switch[aria-checked="true"] .switch-thumb {
-  transform: translateX(15px);
+  transform: translateX(14px);
 }
 
 .switch-text strong {
   display: block;
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .switch-text small {
@@ -1068,24 +1395,83 @@ button {
 }
 
 /* --------------------------------------------------------------------- */
-/* Log                                                                    */
+/* Log - one for the whole bench, shut until you want it                  */
 /* --------------------------------------------------------------------- */
+
+.logbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 28px 0 22px;
+  background: var(--zinc-900);
+  color: var(--zinc-300);
+}
+
+.log-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: var(--zinc-300);
+  padding: 9px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.log-toggle:hover {
+  color: #fff;
+}
+
+.log-toggle .caret {
+  border-top-color: currentColor;
+  transform: rotate(-90deg);
+}
+
+.log-toggle[aria-expanded="true"] .caret {
+  transform: rotate(0deg);
+}
+
+/* The last line, so a shut drawer still says what happened. */
+.log-last {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--zinc-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logbar .link-btn {
+  color: var(--zinc-500);
+}
+
+.logbar .link-btn:hover {
+  color: #fff;
+  background: var(--zinc-800);
+}
 
 .log {
   background: var(--zinc-900);
-  border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 4px 28px 16px;
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.65;
   color: var(--zinc-300);
-  max-height: 420px;
+  height: 240px;
   overflow-y: auto;
+  border-top: 1px solid var(--zinc-800);
 }
 
 .log .empty {
   color: var(--zinc-500);
-  padding: 4px 0;
+  padding: 8px 0;
   font-family: var(--font);
 }
 
@@ -1128,7 +1514,7 @@ button {
 }
 
 /* --------------------------------------------------------------------- */
-/* Update popup                                                            */
+/* Dialogs                                                                */
 /* --------------------------------------------------------------------- */
 
 .modal-backdrop {
@@ -1156,6 +1542,10 @@ button {
   animation: modal-in 0.14s ease-out;
 }
 
+.modal-wide {
+  width: min(620px, 100%);
+}
+
 @keyframes modal-in {
   from {
     opacity: 0;
@@ -1175,6 +1565,10 @@ button {
   line-height: 1.5;
   margin-top: 8px;
   white-space: pre-line;
+}
+
+.modal-note {
+  margin-bottom: 14px;
 }
 
 /* Whatever the release said, at the size of a footnote: nobody makes the
@@ -1200,9 +1594,13 @@ button {
 
 .modal-foot {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   margin-top: 18px;
+}
+
+.modal-spacer {
+  flex: 1 1 auto;
 }
 
 /* --------------------------------------------------------------------- */

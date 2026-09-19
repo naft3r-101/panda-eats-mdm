@@ -102,42 +102,60 @@ the installer and uploads it. Every bench PC picks it up the next time it starts
 
 ## The workflow
 
-Four tabs, in the order a tablet goes through them: **Setup**, **Provision**, **Verify**, **Tools**.
+Four numbered steps across the top, in the order a tablet goes through them: **Set up**,
+**Tune**, **Check**, **Ship**. Each step owns exactly one filled button, in the bar along the
+bottom. Everything that is not part of that line lives in one of the two menus.
 
 ```
-1. Plug tablet in       -> verify: it appears in the sidebar with its model name, and the chip
-                                   under it says whether it was ever provisioned
-2. Setup tab            -> verify: the order app is installed (Play, or an APK), wallpaper set
-3. Provision tab        -> verify: the plan lists every change it is about to make, and the
-                                   audit detail below the log shows why (read-only until Apply)
-4. Set Aggressive?      -> verify: the plan re-reads the tablet and the counts move
-5. Apply                -> verify: every log line is a green check
+1. Plug tablet in       -> verify: it appears in the sidebar with its model name, and the strip
+                                   under its name says whether it was ever provisioned
+2. Step 1, Set up       -> verify: the order app is installed (Play, or an APK file)
+3. Step 2, Tune         -> verify: the plan lists every change it is about to make, and
+                                   "What the tablet looks like" shows why (read-only until Apply)
+4. Aggressive tier?     -> verify: the plan re-reads the tablet and the counts move
+5. Apply                -> verify: every line in the log drawer is a green check
 6. Reboot the tablet    -> verify: the plan re-reads to "Nothing to apply"
-7. Verify tab           -> verify: Overall says Ready; every red row is gone; a test slip printed
+7. Step 3, Check        -> verify: Overall says Ready; every red row is gone; a test slip printed
 8. Tick the checklist   -> verify: pair, Wi-Fi, printer, test order - the taps only a human
                                    can do, kept per tablet
-9. Ship                 -> verify: the handover is on the tablet and USB debugging is off
+9. Step 4, Ship         -> verify: the handover is on the tablet and USB debugging is off
 ```
 
 Step 6 matters. Some settings only fully take effect after a reboot, and an audit on a freshly
 rebooted tablet is the only audit worth trusting.
 
-Step 7 is the difference between "matches the profile" and "can take an order". The Provision tab
-answers the first question; the Verify tab answers the second, from the tablet's own point of view.
+Step 7 is the difference between "matches the profile" and "can take an order". Step 2 answers
+the first question; step 3 answers the second, from the tablet's own point of view.
 
-**The audit and the plan are the same read**, which is why they share a tab. One call to
+**The audit and the plan are the same read**, which is why they share a step. One call to
 `preview()` returns the audit and the exact plan Apply would execute, built by the single planner
-in `provision.js`; the plan sits above the Apply button and the audit detail (device, order app,
-settings, bloat) below its log. There is no way for the preview and the execution to disagree
-about what "disable this package" means.
+in `provision.js`; the plan sits at the top of step 2 and the audit detail (device, order app,
+settings, bloat) folds away underneath it. There is no way for the preview and the execution to
+disagree about what "disable this package" means.
 
-**Tools** holds Rollback and Discover, the two things used once a month.
+### Where everything else is
+
+Nothing was removed in the move to four steps; the once-a-month controls were gathered up so the
+forty-times-a-day ones stand alone.
+
+| Menu | Holds |
+| ---- | ----- |
+| **Tablet actions**, top right | Set wallpaper, open the tablet's system update screen, reboot, power off |
+| **Bench settings**, bottom left | Check for updates, locate adb, open the profiles folder, open the rollback folder |
+| **Rollback & cleanup**, off the end of the step rail | Rollback points, and Discover - scanning for packages no profile covers |
+
+The **log** is one drawer along the bottom for the whole app rather than one per step. It opens
+itself the moment a run starts, and the bar keeps the last line visible when it is shut.
+
+The strip under the tablet's name is the only place a warning appears outside a step: an MDM
+owning the tablet, counter-readiness drift, and what the tablet's own record says about when it
+was last provisioned.
 
 **Apply still re-reads the tablet at execution time.** The preview on screen may be minutes old,
 or may belong to a tablet you have since unplugged, so the plan that actually runs is always built
 from a read taken at that moment. If the two differ, the log is the truth.
 
-### The Setup tab
+### Step 1, Set up
 
 Three things a fresh tablet needs that Provision cannot do unattended, because each one ends in a
 tap on the tablet's own screen. They are deliberately kept out of Apply - burying a step that
@@ -165,13 +183,13 @@ finished.
 Only if two things are both true, and the audit now tells you about both.
 
 1. **A Google account is signed in.** With none, Play cannot install or update anything, so every
-   future build has to arrive over a USB cable. The Audit tab reports the account state and warns
+   future build has to arrive over a USB cable. The audit on step 2 reports the account state and warns
    when there is none, because a tablet that can never update itself is a thing you want to know
    about before it leaves the bench, not three months later.
 
 2. **The APK's signing certificate matches the one Play distributes.** The order app is published
    as an AAB, so Play App Signing re-signs it with Google's key - which is not the local
-   `release.jks` unless that key was uploaded as the app signing key. The Setup tab reads each
+   `release.jks` unless that key was uploaded as the app signing key. Step 1 reads each
    APK's certificate with `apksigner` and shows whether it is debug- or release-signed. A
    debug-signed build can never be updated by Play and cannot even install over a Play build; it
    fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
@@ -221,7 +239,7 @@ nothing on a tablet the audit had just called not ready.
 ### Rollback
 
 Every Apply writes a rollback point **before it touches the device**, so even a crash mid-run
-leaves a working revert. The Rollback tab lists them per tablet. Reverting:
+leaves a working revert. Rollback & cleanup lists them per tablet. Reverting:
 
 - puts every setting back to the exact value it held (or unsets it, if it was unset)
 - re-enables every package that run disabled
@@ -229,12 +247,12 @@ leaves a working revert. The Rollback tab lists them per tablet. Reverting:
 - restores the previous media volume and screen brightness
 
 Rollback points live in `state/` during development, and in the app's userData folder once
-packaged. The **Open folder** button on the Rollback tab takes you there.
+packaged. **Bench settings > Open rollback folder** takes you there.
 
 Reverting also revokes the runtime permissions that run granted and turns a lock screen that run
 switched off back on.
 
-### The Verify tab
+### Step 3, Check
 
 Read-only, and meant for the moment after the reboot. Where the audit asks "does this tablet match
 the profile", Verify asks "can it take an order right now", and it asks the tablet rather than the
@@ -256,8 +274,8 @@ PC:
 | Google account signed in | So Play can update the app. A warning |
 | Provisioned with the current profile | The record on the tablet (below) against a fingerprint of `profiles/` as it is now |
 
-Only red rows make the tablet **Not ready**. Each one says where it gets fixed: the Provision tab,
-the Setup tab, "Open order app on tablet", or the tablet's own screen.
+Only red rows make the tablet **Not ready**. Each one says where it gets fixed: step 2, step 1,
+"Open order app on tablet", or the tablet's own screen.
 
 **Print test slip** sends a short ESC/POS receipt to the printer address **from the tablet**: the
 bytes are pushed to the tablet and its own `nc` opens port 9100, so what is proved is the exact
@@ -323,7 +341,7 @@ profiles/
 
 A `!` prefix on a line marks it aggressive-tier.
 
-To grow a list: run the **Discover** tab against a real tablet. It shows every system package that
+To grow a list: run **Discover**, under Rollback & cleanup, against a real tablet. It shows every system package that
 no profile mentions and that is not protected. Paste the junk you recognise into the OEM file and
 re-audit. The Lenovo list in particular is thin and expects this.
 
@@ -384,7 +402,7 @@ the line from `profiles/`.
 
 ## When another MDM already owns the tablet
 
-The Audit tab checks for an existing Device Owner or Profile Owner and puts a red banner at the
+The audit checks for an existing Device Owner or Profile Owner and puts a red notice at the
 top of the page when it finds one. This matters more than anything else on that screen: a Device
 Owner outranks adb completely. It can re-enable packages Panda Bench disables and re-impose
 settings at its next sync, so everything this tool does to such a tablet is provisional.
@@ -434,20 +452,52 @@ Be honest about the gaps. These still need a human on the tablet's own screen:
   stub; Samsung ships its own picker). A `file://` URI is silently rejected by the chooser.
 
   What does work, and what Panda Bench does: push the image, register it with MediaStore so it has
-  a `content://` identity, then fire the standard "Set as" intent against that URI with a read
-  grant. The chooser opens with the picture already loaded, so it is one tap rather than a hunt
-  through the Gallery. Verified on an SM-T227U running Android 14.
+  a `content://` identity, then open a picker against that URI with a read grant. The picker opens
+  with the picture already loaded, so it is one tap rather than a hunt through the Gallery.
+
+  **Which picker is not the same on every tablet**, and getting this wrong is why the onn 7 core
+  would not take a wallpaper until 9/19/2026. The old code only ever sent `ATTACH_DATA`. On One UI
+  that is Samsung's own "Set as" chooser and it works. On the onn,
+  `cmd package query-activities -a android.intent.action.ATTACH_DATA -t image/png` returns exactly
+  one handler: `com.android.contacts`' AttachPhotoActivity. No chooser appears, `am start` reports
+  success, and the operator lands on a screen for setting a *contact* photo.
+
+  So `openSetAsWallpaper()` now tries three intents in order and reports which one opened:
+
+  | Order | Intent | Where it wins |
+  | ----- | ------ | ------------- |
+  | 1 | `CROP_AND_SET_WALLPAPER` at `com.android.wallpaper/.picker.StandalonePreviewActivity` | AOSP-ish builds - the onn, Pixel. Trampolines to WallpaperPreviewActivity |
+  | 2 | `CROP_AND_SET_WALLPAPER` at `com.android.wallpapercropper/.WallpaperCropActivity` | older AOSP |
+  | 3 | `ATTACH_DATA` | Samsung One UI |
+
+  Both wallpaper attempts name an explicit **component** rather than firing the bare action. That
+  skips an "Open with" box between two entries that do the same job, and - the reason that matters
+  - One UI answers that action with a vestigial activity that resolves and then dies instantly, so a
+  bare action would report success and turn a working Samsung path into a silently broken one.
+  A device missing a component just falls through to the next line.
 
   **Why an MDM can do this and adb cannot:** the wallpaper is set through `WallpaperManager`, and
   any *app* holding the ordinary `SET_WALLPAPER` permission can call it directly with no user
   interaction. adb is not an app and has no shell command for it. That asymmetry is the whole
   story - it is not a privilege gap, it is a missing shell command.
 
-  **And an MDM can lock it.** A Device Owner can set `DISALLOW_SET_WALLPAPER`, after which the
-  chooser still opens and the tap still looks like it worked, but Android discards the result.
-  Panda Bench reads that restriction before it does anything and refuses with an explanation
-  instead of reporting a success that never happened - the Setup tab disables the button and names
-  the package holding the lock. Only the device owner can lift it.
+  **And it can be locked.** With `DISALLOW_SET_WALLPAPER` in force the chooser still opens and the
+  tap still looks like it worked, but Android discards the result. Panda Bench reads that
+  restriction before it does anything and refuses with an explanation instead of reporting a
+  success that never happened.
+
+  **Reading that restriction is harder than it looks**, and Panda Bench got it wrong until
+  9/19/2026. `dumpsys user` prints far more than the restrictions in force: a "Guest restrictions"
+  list, and a "User types" catalogue in which almost every profile type carries `no_wallpaper` in
+  its `mDefaultRestrictions`. Scraping the dump for `no_[a-z_]+` therefore found `no_wallpaper` on
+  a stock, unmanaged tablet - one that says `Device managed: false` a few lines above - and the app
+  told the operator an MDM had locked the wallpaper on a tablet that had no MDM on it at all. Only
+  the current user's own block counts: `parseUserRestrictions()` in `adb.js` reads its "Effective
+  restrictions" (base plus device policy, already merged), falling back to the union of the halves
+  on platforms that predate that line. It is covered by tests against both dumps.
+
+  The message names an admin only when there is one. The restriction and an MDM are two different
+  facts, and blaming an absent MDM sends people hunting for an enrolment that does not exist.
 
 - **Applying a firmware update.** Signed and vendor-driven. Panda Bench opens the update screen and
   tells you how stale the patch level is; the taps are yours.
@@ -458,19 +508,19 @@ Be honest about the gaps. These still need a human on the tablet's own screen:
 - **Samsung "Sleeping apps"** is not a gap after all. The doze exemption Apply sets is what
   Settings > Apps > PE Orders > Battery shows as **Unrestricted**, Samsung's sleeper skips such
   apps, and its pickers do not even offer them. If a Samsung tablet goes quiet overnight, check that
-  page reads Unrestricted (the Verify tab's "Survives in the background" row is the same fact).
+  page reads Unrestricted (step 3's "Survives in the background" row is the same fact).
 - **Battery optimization dialog.** The order app already fires this itself once per pairing
   (`MainActivity.maybeRequestBatteryExemption`), so accept it when it appears.
 - **A screen lock with a code.** Swipe-only is handled: `locksettings set-disabled true` turns it
   off and Apply does that. A PIN, pattern or password needs the code itself, so it is reported on
-  the Audit and Verify tabs and left alone.
+  the audit and step 3 and left alone.
 - **Wi-Fi credentials and Google sign-in.** Manual. `cmd wifi connect-network` exists but is
   refused to the shell user on One UI 6.1, so there is no adb path onto a network.
 - **Play auto-update.** A per-app toggle inside the Play Store UI. Untouched by decision, and
-  unreadable over adb - the Verify tab checks the outcome instead (is the tablet on the build Play
+  unreadable over adb - step 3 checks the outcome instead (is the tablet on the build Play
   is serving).
 
-The ones that need a tap are on the Verify tab's checklist, so they get ticked rather than
+The ones that need a tap are on step 3's checklist, so they get ticked rather than
 remembered.
 
 ---
