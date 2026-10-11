@@ -5,7 +5,7 @@
  *
  * Every sample here was captured from hardware (an SM-T227U on Android 14
  * unless noted) and then trimmed. Two of them exist to guard landmines the
- * README documents: adb's CRLF on Windows, and dumpsys prefix-matching.
+ * operator guide documents: adb's CRLF on Windows, and dumpsys prefix-matching.
  */
 
 const test = require('node:test');
