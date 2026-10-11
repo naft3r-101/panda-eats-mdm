@@ -69,10 +69,13 @@ function plainNotes(info) {
 }
 
 /**
- * The feed is the repo's public releases, so the check needs no credential at
- * all and a fresh bench PC self-updates out of the box. That was not always
- * true: the repo was private to begin with, every bench needed a token, and in
- * practice none of them had one.
+ * The feed is a separate public repo that holds only releases
+ * (naft3r-101/panda-bench-releases), so the check needs no credential at all
+ * and a fresh bench PC self-updates out of the box, while the source repo stays
+ * private. That was not always true: the source repo was the feed to begin
+ * with, so it had to be private with a token on every bench (none had one) or
+ * public with its internals on show. 0.7.1 was the bridge release, published
+ * to both repos so 0.7.0 installs would follow the move.
  *
  * PANDA_BENCH_UPDATE_TOKEN is still honoured for the day the repo goes private
  * again, or for a rate-limited network. It is read from our own variable
