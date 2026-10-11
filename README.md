@@ -12,8 +12,9 @@ changes anything, and nothing is uninstalled: apps are only disabled, and come b
 
 ## Install
 
-Download the installer from [Releases](../../releases/latest). An installed copy checks for
-updates when it starts and only restarts when you say so.
+Download the installer from
+[Releases](https://github.com/naft3r-101/panda-bench-releases/releases/latest). An installed
+copy checks for updates when it starts and only restarts when you say so.
 
 On the tablet: turn on Developer options and **USB debugging**, plug it in, and accept the prompt
 on the tablet's screen.

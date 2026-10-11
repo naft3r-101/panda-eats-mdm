@@ -83,8 +83,9 @@ pnpm start          # or: pnpm dev, which opens devtools
 
 ## Keeping Panda Bench itself up to date
 
-An installed copy checks the repo's releases when it starts, and **Updates** in the sidebar checks
-on demand. A new version downloads quietly in the background and a popup offers to install it; it
+An installed copy checks the public releases repo,
+[naft3r-101/panda-bench-releases](https://github.com/naft3r-101/panda-bench-releases), when it
+starts, and **Updates** in the sidebar checks on demand. A new version downloads quietly in the background and a popup offers to install it; it
 only ever installs when you press **Restart now**, and if a tablet is mid-run the popup waits until
 the run finishes rather than interrupting it. Releases are public, so a bench PC needs no token and
 no GitHub account.

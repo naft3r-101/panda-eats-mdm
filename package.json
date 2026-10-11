@@ -1,6 +1,6 @@
 {
   "name": "panda-bench",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "Panda Bench - tablet provisioning workbench for Panda Eats order-taking tablets. Audits, debloats, and tunes an Android tablet over adb. No root, no factory reset, fully reversible.",
   "main": "electron/main.js",
@@ -59,7 +59,7 @@
       {
         "provider": "github",
         "owner": "naft3r-101",
-        "repo": "panda-eats-mdm",
+        "repo": "panda-bench-releases",
         "private": false,
         "releaseType": "release"
       }
