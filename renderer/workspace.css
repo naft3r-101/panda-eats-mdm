@@ -152,10 +152,12 @@ button { transition: background .16s, border-color .16s, box-shadow .16s; }
 .section-icon { color: var(--coral); margin-bottom: 10px; }
 .wallpaper-card h3 { font-size: 16px; font-weight: 650; letter-spacing: -.3px; }
 .wallpaper-card > p { font-size: 11px; color: var(--zinc-600); line-height: 1.6; margin-top: 7px; }
-.wallpaper-preview { display: flex; justify-content: center; align-items: center; gap: 10px; height: 140px; overflow: hidden; margin: 14px -2px 9px; }
-.wallpaper-preview img { height: 123px; width: 78px; object-fit: cover; border: 3px solid #fff; border-radius: 11px; box-shadow: 0 4px 10px #5130241f; }
+.wallpaper-preview { display: flex; justify-content: center; align-items: center; height: 140px; overflow: visible; margin: 14px -2px 9px; }
+.wallpaper-preview img { height: 114px; width: 72px; object-fit: cover; border: 3px solid #fff; border-radius: 11px; box-shadow: 0 4px 10px #5130241f; }
+/* Sized and barely overlapped so the whole fan fits; wider, the outer two were clipped. */
+.wallpaper-preview img + img { margin-left: -8px; }
 .wallpaper-preview img:first-child { transform: rotate(-7deg) translateY(8px); }
-.wallpaper-preview img:nth-child(2) { transform: translateY(-2px); }
+.wallpaper-preview img:nth-child(2) { position: relative; z-index: 1; transform: translateY(-2px); }
 .wallpaper-preview img:nth-child(3) { transform: rotate(7deg) translateY(8px); }
 .wallpaper-preview.has-choice img { width: 100px; height: 135px; transform: none; }
 .wallpaper-preview > span { font-size: 12px; color: var(--zinc-500); }

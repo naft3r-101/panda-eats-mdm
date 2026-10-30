@@ -28,8 +28,7 @@ const os = require('node:os');
 
 // The adb server inherits this directory and can keep it locked on Windows.
 function adbWorkingDirectory() {
-  const dir = process.platform === 'win32' && fs.existsSync('D:\\tmp') ? 'D:\\tmp' : os.tmpdir();
-  return dir;
+  return os.tmpdir();
 }
 
 const DEFAULT_TIMEOUT_MS = 30000;
