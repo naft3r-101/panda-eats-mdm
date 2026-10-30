@@ -1,0 +1,2 @@
+# Disposable test APK only. This file is not part of the shipping profiles.
+com.benchfixture.disposable

@@ -34,9 +34,13 @@ function readLines(file) {
 /**
  * @returns {Array<{scope:string, key:string, value:string}>}
  */
-function loadSettings() {
+function loadSettings(manufacturer = '', installed = new Set()) {
   const out = [];
-  for (const line of readLines(path.join(profilesDir(), 'settings.txt'))) {
+  const oem = String(manufacturer).toLowerCase().trim();
+  const files = ['settings.txt'];
+  if (['lenovo', 'samsung'].includes(oem)) files.push(`settings/${oem}.txt`);
+  if (installed.has('com.mediatek.duraspeed')) files.push('settings/mediatek.txt');
+  for (const line of files.flatMap(file => readLines(path.join(profilesDir(), file)))) {
     const parts = line.split(/\s+/);
     if (parts.length < 3) continue;
     const [scope, key, value] = parts;
@@ -106,6 +110,10 @@ function availableOems() {
 function fingerprint() {
   const dir = profilesDir();
   const files = ['settings.txt', 'protected.txt'];
+  const settingsDir = path.join(dir, 'settings');
+  if (fs.existsSync(settingsDir)) {
+    for (const f of fs.readdirSync(settingsDir).filter(f => f.endsWith('.txt')).sort()) files.push(path.join('settings', f));
+  }
   const bloat = path.join(dir, 'bloat');
   if (fs.existsSync(bloat)) {
     for (const f of fs.readdirSync(bloat).filter((f) => f.endsWith('.txt')).sort()) files.push(path.join('bloat', f));

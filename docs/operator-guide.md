@@ -6,7 +6,7 @@ You plug a tablet into your PC over USB, run an audit, hit Apply, and it comes o
 tuned for always-on counter duty, and set up so the order listener does not get put to sleep by
 Android's battery managers.
 
-**No root. No factory reset. Everything reversible.** It is a GUI over `adb`, which means it works
+**No root. No factory reset. Permanent app deletions are listed before Apply.** It is a GUI over `adb`, which means it works
 on a tablet that is already in the field, including one that is already paired to a restaurant.
 
 ---
@@ -16,14 +16,15 @@ on a tablet that is already in the field, including one that is already paired t
 | Area | What happens |
 | ---- | ------------ |
 | **Speed** | Window and transition animations off, animator scale halved, app caches trimmed |
-| **Debloat** | `pm disable-user --user 0` on Bixby, Samsung Free, Facebook stubs, Game Launcher, AR Emoji, Lenovo's store, and ~60 more per OEM |
+| **Debloat** | For packages named in a bloat profile, read pm path. Apps in /data/app are deleted for good with their data. Built-in apps under /system, /product or /vendor are switched off for user 0. Protected and Panda Eats apps are never removed |
 | **Always-on** | Screen never sleeps while plugged in, 30 minute timeout when unplugged, no screensaver |
 | **Audible** | Do Not Disturb off, media volume pinned to the device maximum |
 | **Readable** | Adaptive brightness off, no pre-sleep dim, no battery-saver brightness limiter, screen held at 80% of the tablet's own maximum or higher |
-| **Background survival** | Order app added to the doze whitelist, standby bucket forced to `active`, background app-ops allowed, adaptive battery and app standby turned off |
+| **Background survival** | Order app added to the doze whitelist, standby bucket forced to `active`, background app-ops allowed, adaptive battery and app standby turned off. Where DuraSpeed is installed, its app and both background controls are switched off and read back |
 | **Allowed to alert** | The notification and Bluetooth runtime permissions granted to the order app. Play grants neither; a Play-installed build starts silent |
 | **Nothing in the way** | A swipe-only lock screen turned off, so orders are on screen the moment the tablet is. A PIN is reported, never removed |
-| **Battery longevity** | Charge capped at 80% (Samsung's Battery protection, "Maximum"), fast charging off. These tablets never leave the cable, and a cell held at 100% and warm is the one that swells |
+| **Battery longevity** | 80% on Samsung with One UI 6.1 Maximum, 60% on Lenovo with Battery protection mode. Older Samsung versions use 85%. Samsung fast charging is switched off. Each brand uses its own control, read back after Apply |
+| **Wallpaper** | Optional in Apply: counter, dark, light, or your own image. Sets home and lock screens without a tap, saves the old wallpaper for Revert, and checks both wallpaper IDs |
 | **Clock** | Automatic date, time and time zone on. A drifted clock breaks the backend connection and prints wrong times |
 | **Network** | Wi-Fi scan throttling off, Wi-Fi stays up while asleep, captive-portal nagging off |
 
@@ -36,8 +37,9 @@ These were decisions, not omissions.
   Panda Bench takes no position on that tradeoff.
 - **No lockdown.** The browser, Play Store, and Galaxy Store stay reachable. Tablets remain
   general-purpose. Nothing is pinned to the order app.
-- **Nothing is uninstalled.** Every "removed" package is disabled for user 0 and comes back with
-  `pm enable`. A factory reset also restores everything.
+- **Only named apps can be deleted.** Bench never uninstalls an app unless a bloat profile names it,
+  its install path is /data/app, and it passes the guard list. Apps the restaurant installed that
+  are not in the profile stay alone. Deleted apps and their data cannot be restored by Bench.
 - **Rotation is left alone.** `MainActivity` is `screenOrientation="fullUser"` on purpose, and
   forcing portrait would contradict that.
 
@@ -130,7 +132,7 @@ the first question; step 3 answers the second, from the tablet's own point of vi
 
 **The audit and the plan are the same read**, which is why they share a step. One call to
 `preview()` returns the audit and the exact plan Apply would execute, built by the single planner
-in `provision.js`; the plan sits at the top of step 2 and the audit detail (device, order app,
+in `provision.js`; the plan separates **Delete for good** from **Switch off** at the top of step 2. The audit detail (device, order app,
 settings, bloat) folds away underneath it. There is no way for the preview and the execution to
 disagree about what "disable this package" means.
 
@@ -158,7 +160,7 @@ from a read taken at that moment. If the two differ, the log is the truth.
 
 ### Step 1, Set up
 
-Three things a fresh tablet needs that Provision cannot do unattended, because each one ends in a
+Two things a fresh tablet needs that Provision cannot do unattended, because each one ends in a
 tap on the tablet's own screen. They are deliberately kept out of Apply - burying a step that
 needs a human inside a batch that otherwise runs by itself would make Apply a liar about having
 finished.
@@ -201,19 +203,67 @@ release-signed build after verifying its certificate matches Play's. Either way 
 `min_supported_version_code` is the backstop - a tablet stuck on an old build gets flagged
 server-side.
 
-**Wallpaper.** Ships with Panda Eats wallpapers, or pick your own image. See the limits section -
-this one always needs a tap.
-
 **System update.** Shows the tablet's security patch level and how old it is, and opens the update
 screen on the device. Firmware updates are signed and vendor-driven; nothing can apply one over
 adb.
 
+### Wallpaper with Apply
+
+In step 2, choose **Wallpaper with Apply > Choose wallpaper**. Pick counter, dark, light,
+or **Use my own image**, then **Use this wallpaper with Apply**. The plan includes the choice.
+**Keep current wallpaper** removes it from the plan. Tablet actions > Set wallpaper also works
+on its own and creates its own rollback point.
+
+Bench installs a small helper with Android's normal SET_WALLPAPER permission. It saves the old
+home and lock images to the rollback folder before changing either. On Android 11 and later,
+it temporarily allows storage access to read the old wallpaper, then restores that access and
+disables the helper. It does not uninstall anything. There is no network connection, launcher,
+location access, or enrollment. Only the USB shell can call the helper.
+
+The image fills the screen with a centered crop. Width and height use the same scale, so the
+463 by 401 panda logo keeps its shape. A wide image on a tall screen loses its outer edges.
+Bench sets home and lock separately, then reads both IDs from dumpsys wallpaper. A successful
+command alone does not count. Revert restores both images, including a lock screen that used
+to share the home wallpaper, and reads the result back.
+
+If backup or automatic setting fails, Bench opens the existing picker and says the wallpaper
+is **not confirmed**. Finish it on the tablet. Apply ends with a warning, not a success message.
+A live wallpaper needs manual backup. An active wallpaper restriction stops the operation.
+
+### Lenovo Tab M8 HD and MediaTek
+
+The Lenovo profile covers the TB-8505F as well as the older TB-X606F. It covers the demo,
+What's New, Kid's Mode, support helper, SIM lock helper, Dolby Audio controls, Digital Turbine,
+and the listed preloaded games and news apps. It covers apps in /data/app as well as system apps.
+**com.dolby.daxservice stays protected** because it is the audio engine used for order chimes.
+
+The audit calls out Grubhub's order app and helpers and SureLock kiosk software in plain words.
+These may be leftovers from a previous operator. Apply deletes them for good when pm path places
+them in /data/app. Built-in copies are switched off. The audit shows which action applies.
+Already uninstalled packages are skipped; Bench does not reinstall them for a test.
+
+On any brand with com.mediatek.duraspeed, Background survival shows the package state and both
+system and global setting.duraspeed.enabled values. Apply sets both to 0 and disables the app.
+The TB-8505F's DuraSpeed app reads system and writes both keys. Its framework service watches
+global and reads system on user switch. Writing only system leaves the running service unchecked.
+
+Lenovo Battery protection mode stops charging at **60%, not 80%**. On HGT502R3, switching it off
+and on in Settings changed only system battery_protected_charge between 0 and 1. The Samsung
+global protect_battery value did not move. Apply uses the Lenovo key only on Lenovo tablets.
+If that control is absent, the audit says it is not confirmed and asks the operator to check
+Settings > Battery. Storing an unused key is not proof of a charging limit.
+
+See [the HGT502R3 test record](validation/HGT502R3-2026-10-30.md) for device readbacks and screenshots.
+
 ### Aggressive tier
 
-Off by default. It adds a second list: the Google app and Assistant, Photos, Drive, Maps, Gmail,
+Off by default. It adds a second list: Photos, Drive, Maps, Gmail,
 Galaxy Store, Samsung Cloud, Samsung Notes, and similar. Bigger speed win, but the tablet loses
 real features. Fine for a tablet that only ever runs the order app. Think twice if the restaurant
 uses it for anything else.
+
+The same install-path rule applies: /data/app entries are deleted for good, built-in apps are
+switched off, and protected apps stay untouched. Check the permanent-deletion list before Apply.
 
 The audit tells you how many packages the aggressive tier is holding back, so you can see what
 you would gain before turning it on.
@@ -239,13 +289,18 @@ nothing on a tablet the audit had just called not ready.
 
 ### Rollback
 
+**Deleted apps and their data cannot be restored by Bench.** The audit and Apply plan list
+them separately before deletion. Rollback points record these deletions as permanent, not as
+apps that can be re-enabled. If needed later, reinstall and set up those apps separately.
+
 Every Apply writes a rollback point **before it touches the device**, so even a crash mid-run
-leaves a working revert. Rollback & cleanup lists them per tablet. Reverting:
+leaves a record of the run. Rollback & cleanup lists them per tablet. Reverting the reversible changes:
 
 - puts every setting back to the exact value it held (or unsets it, if it was unset)
 - re-enables every package that run disabled
 - restores the doze exemption, standby bucket, and app-ops to what they were
 - restores the previous media volume and screen brightness
+- restores home and lock wallpapers saved by that run
 
 Rollback points live in `state/` during development, and in the app's userData folder once
 packaged. **Bench settings > Open rollback folder** takes you there.
@@ -353,10 +408,10 @@ Adding a new OEM is one file: `profiles/bloat/<manufacturer>.txt`, lowercased to
 
 ## Safety
 
-The thing that separates a debloat tool from a brick is the guard list, so it is worth knowing
+The guard list applies to both switching apps off and deleting apps, so it is worth knowing
 exactly what protects you.
 
-**A package is skipped if any of these is true:**
+**A package is never deleted or switched off if any of these is true:**
 
 - it is in `profiles/protected.txt` (58 entries: framework, providers, WebView, GMS, Play, keyboards, launchers, Chrome)
 - it is the device's **current keyboard**, resolved live from `default_input_method`
@@ -369,6 +424,24 @@ skipped silently, and the audit shows you exactly which ones were found before a
 
 Protected packages that appear in a bloat list are shown in the audit with the reason they were
 blocked, rather than being hidden.
+
+### Permanent deletion or switching off
+
+For every installed package named in the selected bloat profile, the audit reads pm path.
+All split APK paths must agree. Paths under /data/app mean **Delete for good** with pm uninstall.
+Paths under /system, /product, /vendor, /system_ext, /odm or /oem mean **Switch off** with
+pm disable-user --user 0. Unknown, unreadable or mixed paths are skipped and reported.
+An updated system app in /data/app may return Success after removing only its update. Bench
+checks again, reports that the built-in copy remains, and does not claim deletion. Re-read the
+tablet and Apply again to switch off that copy. The removed update and its data cannot be restored
+by Bench.
+
+The plan lists permanent deletions separately, including each package and its path. Check this
+list before pressing Apply on a restaurant's tablet. Apply re-reads the profile, path, keyboard,
+launcher and protected list before each deletion. Afterward, it checks the installed package list
+to confirm the exact package is gone. A successful command alone is not proof. Disabled system
+apps are also read back. Skip debloat skips both kinds of action. Discover still only switches
+apps off; it cannot permanently delete packages that no bloat profile names.
 
 ### Writes that lie
 
@@ -447,56 +520,6 @@ count on one. A carrier-managed device is not a blank device.
 
 Be honest about the gaps. These still need a human on the tablet's own screen:
 
-- **Setting the wallpaper image.** There is no adb path to it, and this was tested rather than
-  assumed. `cmd wallpaper` exists but exposes only dimming - there is no `set`. The AOSP
-  `CROP_AND_SET_WALLPAPER` activity resolves on One UI but dies the instant it starts (a vestigial
-  stub; Samsung ships its own picker). A `file://` URI is silently rejected by the chooser.
-
-  What does work, and what Panda Bench does: push the image, register it with MediaStore so it has
-  a `content://` identity, then open a picker against that URI with a read grant. The picker opens
-  with the picture already loaded, so it is one tap rather than a hunt through the Gallery.
-
-  **Which picker is not the same on every tablet**, so `ATTACH_DATA` alone is not enough. On One UI
-  that is Samsung's own "Set as" chooser and it works. On the onn,
-  `cmd package query-activities -a android.intent.action.ATTACH_DATA -t image/png` returns exactly
-  one handler: `com.android.contacts`' AttachPhotoActivity. No chooser appears, `am start` reports
-  success, and the operator lands on a screen for setting a *contact* photo.
-
-  So `openSetAsWallpaper()` now tries three intents in order and reports which one opened:
-
-  | Order | Intent | Where it wins |
-  | ----- | ------ | ------------- |
-  | 1 | `CROP_AND_SET_WALLPAPER` at `com.android.wallpaper/.picker.StandalonePreviewActivity` | AOSP-ish builds - the onn, Pixel. Trampolines to WallpaperPreviewActivity |
-  | 2 | `CROP_AND_SET_WALLPAPER` at `com.android.wallpapercropper/.WallpaperCropActivity` | older AOSP |
-  | 3 | `ATTACH_DATA` | Samsung One UI |
-
-  Both wallpaper attempts name an explicit **component** rather than firing the bare action. That
-  skips an "Open with" box between two entries that do the same job, and - the reason that matters
-  - One UI answers that action with a vestigial activity that resolves and then dies instantly, so a
-  bare action would report success and turn a working Samsung path into a silently broken one.
-  A device missing a component just falls through to the next line.
-
-  **Why an MDM can do this and adb cannot:** the wallpaper is set through `WallpaperManager`, and
-  any *app* holding the ordinary `SET_WALLPAPER` permission can call it directly with no user
-  interaction. adb is not an app and has no shell command for it. That asymmetry is the whole
-  story - it is not a privilege gap, it is a missing shell command.
-
-  **And it can be locked.** With `DISALLOW_SET_WALLPAPER` in force the chooser still opens and the
-  tap still looks like it worked, but Android discards the result. Panda Bench reads that
-  restriction before it does anything and refuses with an explanation instead of reporting a
-  success that never happened.
-
-  **Reading that restriction is harder than it looks.** `dumpsys user` prints far more than the restrictions in force: a "Guest restrictions"
-  list, and a "User types" catalogue in which almost every profile type carries `no_wallpaper` in
-  its `mDefaultRestrictions`. Scraping the dump for `no_[a-z_]+` therefore finds `no_wallpaper` on
-  a stock, unmanaged tablet - one that says `Device managed: false` a few lines above. Only
-  the current user's own block counts: `parseUserRestrictions()` in `adb.js` reads its "Effective
-  restrictions" (base plus device policy, already merged), falling back to the union of the halves
-  on platforms that predate that line. It is covered by tests against both dumps.
-
-  The message names an admin only when there is one. The restriction and an MDM are two different
-  facts, and blaming an absent MDM sends people hunting for an enrolment that does not exist.
-
 - **Applying a firmware update.** Signed and vendor-driven. Panda Bench opens the update screen and
   tells you how stale the patch level is; the taps are yours.
 
@@ -531,7 +554,7 @@ remembered.
   it. Fleet *monitoring* is a different job and already has a home: the order app's heartbeat to the
   Panda Eats backend reports battery, OS version, app version, and printer status.
 - One tablet at a time.
-- The Lenovo list is incomplete and known to be. Use Discover.
+- The Lenovo list covers TB-X606F and TB-8505F. Other models may have extra packages; use Discover.
 - Not signed. Building an installer with `pnpm build` produces an exe that Windows SmartScreen will
   warn about. Running from source with `pnpm start` avoids that entirely and is the intended use.
 - Running from a shell that Claude Code opened needs `ELECTRON_RUN_AS_NODE` unset first, or
@@ -565,12 +588,15 @@ electron/
   adb.js         adb plumbing: run, normalise, parse. No policy.
   provision.js   the engine: audit, apply, revert, verify, test slip, ship, discover. All policy.
   profiles.js    loads the text profiles, fingerprints them
+  wallpaper.js   USB helper, wallpaper backup and readback
   play.js        what Play is serving, via the Developer API and the order app's service account
 renderer/
   index.html     four tabs: Setup, Provision, Verify, Tools
   styles.css     brand tokens mirroring the order app's Color.kt
   app.js         no framework
+wallpaper-helper/ small Android helper source, no network or background service
 profiles/        editable text, hot-loaded, no rebuild needed
+  settings/      Samsung, Lenovo, and package-gated MediaTek controls
 state/           rollback points, one JSON per Apply
   handover/      the per-tablet checklist and printer address
 test/            node:test suites for the parsers, planner, checks and profiles

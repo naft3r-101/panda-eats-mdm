@@ -90,22 +90,8 @@ global automatic_power_save_mode 0
 # ---------------------------------------------------------------------------
 # Battery longevity
 # ---------------------------------------------------------------------------
-# These tablets live on a charger for years. A lithium cell held at 100% and
-# warm is the one that swells, and a swollen battery is the most common way a
-# counter tablet physically dies. Both keys are Samsung's; on other OEMs they
-# are stored and ignored.
-#
-# Battery protection. On One UI 6.1 (Android 14) 1 = "Maximum", which stops
-# charging at 80%; 3 = "Basic" (stop at 100%, resume at 95%); 0 = off. All
-# three were set and read back off the Battery protection screen of an
-# SM-T227U on September 15, 2026. On One UI 4 and 5 the same key is the
-# single 85% cap, so 1 is the right value everywhere it exists.
-global protect_battery 1
-
-# Fast charging is heat, and a tablet that never leaves the cable gains
-# nothing from it. This used to be 1.
-global adaptive_fast_charging 0
-
+# Battery controls are in settings/samsung.txt and settings/lenovo.txt.
+# Do not write another manufacturer's key and call that a charging limit.
 
 # ---------------------------------------------------------------------------
 # Clock

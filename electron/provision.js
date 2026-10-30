@@ -5,8 +5,8 @@
  *
  * Design rules this file is built on:
  *
- *   - Nothing is uninstalled. Bloat is `pm disable-user --user 0`, which `pm
- *     enable` undoes completely.
+ *   - Profile-named /data/app packages are permanently uninstalled. System
+ *     packages are disabled for user 0. Protected and Panda Eats apps stay.
  *   - Nothing is changed before its previous value is written to disk. Apply
  *     writes the rollback file BEFORE it touches the device, so a tool crash
  *     mid-run still leaves a working Revert.
@@ -25,6 +25,7 @@ const adb = require('./adb');
 const apk = require('./apk');
 const play = require('./play');
 const profiles = require('./profiles');
+const wallpaper = require('./wallpaper');
 
 const PANDA_PREFIX = 'com.pandaeats.';
 const APP_OPS = ['RUN_IN_BACKGROUND', 'RUN_ANY_IN_BACKGROUND'];
@@ -220,7 +221,7 @@ async function resolveProtected(serial, installed) {
  * - unlike prefix-matching dumpsys, which is the documented trap.
  */
 function pandaPackages(installed) {
-  return [...installed].filter((p) => p.startsWith(PANDA_PREFIX)).sort();
+  return [...installed].filter((p) => p.startsWith(PANDA_PREFIX) && p !== wallpaper.PKG).sort();
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +299,7 @@ async function audit(serial, opts = {}) {
   };
 
   // --- settings drift ---
-  const wanted = profiles.loadSettings();
+  const wanted = profiles.loadSettings(manufacturer, installed);
   const settings = [];
   for (const entry of wanted) {
     const current = await adb.getSetting(serial, entry.scope, entry.key);
@@ -308,26 +309,37 @@ async function audit(serial, opts = {}) {
       desired: entry.value,
       current,
       ok: valuesEqual(current, entry.value),
+      supported: entry.key !== 'battery_protected_charge' || current != null,
     });
   }
 
   // --- bloat ---
   const lists = profiles.loadBloat(manufacturer);
-  const candidates = aggressive ? [...lists.safe, ...lists.aggressive] : lists.safe;
+  const candidates = [...lists.safe, ...(aggressive ? lists.aggressive : [])];
+  if (installed.has('com.mediatek.duraspeed')) candidates.push('com.mediatek.duraspeed');
   const aggressiveHeld = aggressive
     ? []
     : lists.aggressive.filter((p) => installed.has(p) && !disabled.has(p));
 
   const bloat = [];
-  for (const pkg of candidates) {
+  for (const pkg of new Set(candidates)) {
     if (!installed.has(pkg)) continue; // not on this device, nothing to do
     const isProtected = protectedSet.has(pkg);
+    const paths = await adb.getPackagePaths(serial, pkg);
+    const location = adb.packageLocation(paths);
+    const profileNamed = lists.safe.includes(pkg) || (aggressive && lists.aggressive.includes(pkg));
     bloat.push({
       pkg,
+      paths,
+      location,
+      profileNamed,
+      action: isProtected ? 'protected' : pkg === 'com.mediatek.duraspeed' && !profileNamed ? 'disable'
+        : location === 'data' ? 'uninstall' : location === 'system' ? 'disable' : 'unknown',
       disabled: disabled.has(pkg),
       protected: isProtected,
       protectedReason: isProtected ? protectionReason(pkg, ime, launcher) : null,
       tier: lists.aggressive.includes(pkg) ? 'aggressive' : 'safe',
+      note: packageNote(pkg),
     });
   }
   bloat.sort((a, b) => a.pkg.localeCompare(b.pkg));
@@ -358,7 +370,9 @@ async function audit(serial, opts = {}) {
   }
 
   const settingsDrift = settings.filter((s) => !s.ok).length;
-  const toDisable = bloat.filter((b) => !b.disabled && !b.protected).length;
+  const toDisable = bloat.filter((b) => !b.disabled && !b.protected && b.action === 'disable').length;
+  const toUninstall = bloat.filter(b => !b.protected && b.action === 'uninstall').length;
+  const unknownPackages = bloat.filter(b => !b.protected && b.action === 'unknown').length;
   const appIssues = app.filter((a) => appNeedsFix(a)).length;
 
   const volumeTarget = mediaVolume.max;
@@ -371,6 +385,12 @@ async function audit(serial, opts = {}) {
 
   return {
     device,
+    backgroundSurvival: installed.has('com.mediatek.duraspeed') ? {
+      packageDisabled: disabled.has('com.mediatek.duraspeed'),
+      settings: settings.filter(s => s.key === 'setting.duraspeed.enabled'),
+      ok: disabled.has('com.mediatek.duraspeed') && settings.filter(s => s.key === 'setting.duraspeed.enabled').every(s => s.ok),
+    } : null,
+    batteryProtection: settings.find(s => s.key === 'battery_protected_charge') || null,
     settings,
     bloat,
     app,
@@ -384,13 +404,25 @@ async function audit(serial, opts = {}) {
       settingsDrift,
       settingsTotal: settings.length,
       toDisable,
+      toUninstall,
+      unknownPackages,
       bloatPresent: bloat.length,
       appIssues,
       appPackages: app.length,
       clean:
-        settingsDrift === 0 && toDisable === 0 && appIssues === 0 && volumeOk && brightnessOk && !lockScreen.fixable,
+        settingsDrift === 0 && toDisable === 0 && toUninstall === 0 && unknownPackages === 0 && appIssues === 0 && volumeOk && brightnessOk && !lockScreen.fixable,
     },
   };
+}
+
+function packageNote(pkg) {
+  if (pkg === 'com.grubhub.android.orderhub') return "This tablet still has Grubhub's order app on it.";
+  if (pkg.startsWith('com.grubhub.android.orderhub.')) return "This tablet still has a helper for Grubhub's order app on it.";
+  if (pkg === 'com.gears42.surelock') return 'This tablet still has SureLock kiosk software from another operator on it.';
+  if (pkg === 'com.dti.lenovo.tablet') return 'Digital Turbine installs games and can install them again.';
+  if (pkg === 'com.mediatek.duraspeed') return 'DuraSpeed can close the order app in the background.';
+  if (pkg === 'com.dolby.daxappui') return 'Dolby Audio controls only. The audio engine stays enabled for order chimes.';
+  return null;
 }
 
 /**
@@ -433,10 +465,13 @@ function protectionReason(pkg, ime, launcher) {
  * @param {object} opts {skipSettings, skipBloat, skipAppTuning}
  */
 function buildPlan(report, opts = {}) {
-  const settings = opts.skipSettings ? [] : report.settings.filter((s) => !s.ok);
+  const settings = opts.skipSettings ? [] : report.settings.filter((s) => !s.ok && s.supported !== false);
   const packages = opts.skipBloat
     ? []
-    : report.bloat.filter((b) => !b.disabled && !b.protected).map((b) => b.pkg);
+    : report.bloat.filter((b) => !b.disabled && !b.protected && b.action === 'disable').map((b) => b.pkg);
+  const uninstallPackages = opts.skipBloat ? [] : report.bloat
+    .filter(b => !b.protected && b.profileNamed && b.action === 'uninstall')
+    .map(b => ({ pkg: b.pkg, paths: b.paths }));
   const apps = opts.skipAppTuning ? [] : report.app.filter((a) => appNeedsFix(a));
 
   /**
@@ -478,11 +513,13 @@ function buildPlan(report, opts = {}) {
   return {
     settings,
     packages,
+    uninstallPackages,
     apps,
     levels,
     lockScreen,
+    wallpaper: opts.wallpaperPath ? { path: opts.wallpaperPath, name: path.basename(opts.wallpaperPath) } : null,
     blocked: report.blocked,
-    total: settings.length + packages.length + apps.length + levels.length + (lockScreen ? 1 : 0),
+    total: settings.length + packages.length + uninstallPackages.length + apps.length + levels.length + (lockScreen ? 1 : 0) + (opts.wallpaperPath ? 1 : 0),
   };
 }
 
@@ -581,7 +618,15 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
   const plannedBloat = plan.packages;
   const plannedApps = plan.apps;
 
-  log('info', `Plan: ${plannedSettings.length} setting(s), ${plannedBloat.length} package(s), ${plannedApps.length} app fix(es).`);
+  log('info', `Plan: ${plannedSettings.length} setting(s), ${plannedBloat.length} app(s) to switch off, ${plan.uninstallPackages.length} app(s) to delete for good, ${plannedApps.length} app fix(es).`);
+  if (!opts.skipSettings) {
+    for (const s of report.settings.filter(s => s.supported === false))
+      log('warn', `${s.scope}/${s.key} is not available on this tablet. Check the matching control in Settings.`);
+  }
+  if (!opts.skipBloat) {
+    for (const b of report.bloat.filter(b => b.action === 'unknown'))
+      log('warn', `${b.pkg}: install location could not be read. Left alone.`);
+  }
 
   // Rollback file is written BEFORE anything is touched. A crash mid-apply must
   // still leave a usable Revert.
@@ -600,6 +645,7 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
       applied: s.desired,
     })),
     packages: plannedBloat.map((pkg) => ({ pkg, wasDisabled: false })),
+    deletions: plan.uninstallPackages.map(p => ({ ...p, status: 'planned' })),
     appTuning: plannedApps.map((a) => ({
       pkg: a.pkg,
       previousBucket: a.standbyBucket,
@@ -619,7 +665,7 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
   fs.writeFileSync(file, JSON.stringify(backup, null, 2), 'utf8');
   log('info', `Rollback point saved: ${path.basename(file)}`);
 
-  const results = { settings: [], packages: [], appTuning: [], permissions: [], misc: [], abortedAt: null };
+  const results = { settings: [], packages: [], uninstalls: [], appTuning: [], permissions: [], misc: [], abortedAt: null };
   const disabledOk = [];
 
   // Narrow the rollback record to what actually changed. It was written up
@@ -708,7 +754,8 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
 
     // pm prints "Package ... new state: disabled-user" on success; a non-zero
     // exit or a "not installed" message means it did not take.
-    const ok = r.ok && !/not installed|Unknown package|Failure/i.test(output);
+    const readBack = await adb.listDisabledPackages(serial);
+    const ok = r.ok && !/not installed|Unknown package|Failure/i.test(output) && readBack.has(pkg);
 
     // OEMs mark some packages undisableable. This is permanent, not transient,
     // so say so plainly - the fix is to delete the line from the profile, not
@@ -722,11 +769,45 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
     } else if (oemProtected) {
       log('warn', `${pkg} is protected by the manufacturer and can never be disabled over adb. Remove it from the profile.`);
     } else {
+      if (r.ok) disabledOk.push(pkg); // Keep uncertain writes reversible if the read failed.
       log('warn', `Could not disable ${pkg}`);
     }
   }
   if (plannedBloat.length === 0 && !opts.skipBloat) log('ok', 'No bloat left to disable.');
   for (const pkg of report.blocked) log('warn', `Skipped ${pkg} - protected (${protectionReason(pkg, report.device.ime, report.device.launcher)})`);
+
+  // Permanent deletion is restricted to current profile entries in /data/app.
+  // Re-check the profile, location, and live guards immediately before each deletion.
+  for (const candidate of plan.uninstallPackages) {
+    const pkg = candidate.pkg;
+    const live = await adb.listPackages(serial);
+    assertInventorySane(live);
+    const guards = await resolveProtected(serial, live);
+    const currentProfile = profiles.loadBloat(report.device.manufacturer);
+    const named = [...currentProfile.safe, ...(opts.aggressive ? currentProfile.aggressive : [])].includes(pkg);
+    const currentPaths = await adb.getPackagePaths(serial, pkg);
+    if (!named || guards.set.has(pkg) || pkg.startsWith(PANDA_PREFIX) || adb.packageLocation(currentPaths) !== 'data') {
+      results.uninstalls.push({ pkg, ok: false, error: 'Profile, protection or install location changed' });
+      backup.deletions.find(p => p.pkg === pkg).status = 'skipped';
+      log('warn', `Did not delete ${pkg}. Its profile, protection or install location changed.`);
+      persist();
+      continue;
+    }
+    const r = await adb.uninstallProfilePackage(serial, pkg);
+    bailIfDown(r, `deleting ${pkg}`);
+    const after = await adb.listPackages(serial);
+    assertInventorySane(after);
+    const ok = r.ok && /\bSuccess\b/.test(r.stdout) && !after.has(pkg);
+    const remainingPaths = after.has(pkg) ? await adb.getPackagePaths(serial, pkg) : [];
+    const builtInRemains = after.has(pkg) && adb.packageLocation(remainingPaths) === 'system';
+    const error = builtInRemains
+      ? 'Android removed the update but kept the built-in app. Re-read and Apply to switch off that copy.'
+      : after.has(pkg) ? 'The package is still installed' : r.stderr || r.stdout || 'Deletion was not confirmed';
+    results.uninstalls.push({ pkg, ok, remainingPaths, error: ok ? null : error });
+    backup.deletions.find(p => p.pkg === pkg).status = ok ? 'deleted' : 'not confirmed';
+    persist();
+    log(ok ? 'ok' : 'warn', ok ? `Deleted ${pkg} and its app data for good. Bench cannot restore it.` : `${pkg}: ${error}`);
+  }
 
   // --- order app background survival ---
   for (const a of plannedApps) {
@@ -767,8 +848,10 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
   const vol = report.device.mediaVolume;
   if (vol && vol.max != null) {
     const r = await adb.setMediaVolume(serial, vol.max);
-    results.misc.push({ step: 'media volume', ok: r.ok });
-    log(r.ok ? 'ok' : 'warn', `Media volume set to max (${vol.max})`);
+    const after = await adb.getMediaVolume(serial);
+    const ok = r.ok && after.current === vol.max;
+    results.misc.push({ step: 'media volume', ok });
+    log(ok ? 'ok' : 'warn', ok ? `Media volume confirmed at max (${vol.max})` : `Media volume did not reach ${vol.max}; the tablet reports ${after.current}.`);
   }
 
   // --- screen brightness: it has to be readable from across the counter ---
@@ -812,6 +895,11 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
     );
   }
 
+  if (plan.wallpaper) {
+    const outcome = await setWallpaper(serial, plan.wallpaper.path, onProgress, { file, backup });
+    results.misc.push({ step: 'wallpaper', ...outcome });
+  }
+
   // --- free up cache ---
   const trim = await adb.trimCaches(serial);
   results.misc.push({ step: 'trim caches', ok: trim.ok });
@@ -820,18 +908,24 @@ async function apply(serial, opts = {}, onProgress = () => {}) {
   persist();
 
   // --- leave a record on the tablet ---
+  const ok = [results.settings, results.packages, results.uninstalls, results.appTuning, results.permissions, results.misc].flat().every(r => r.ok)
+    && (opts.skipBloat || report.summary.unknownPackages === 0)
+    && (opts.skipSettings || !report.settings.some(s => s.supported === false));
   const written = await writeRecord(serial, {
     provisionedAt: new Date().toISOString(),
     benchVersion,
-    profile: profiles.fingerprint(),
+    profile: ok ? profiles.fingerprint() : null,
+    complete: ok,
     model: report.device.model,
     manufacturer: report.device.manufacturer,
     aggressive: !!opts.aggressive,
   });
   log(written.ok ? 'ok' : 'warn', written.ok ? `Provisioning record written to ${RECORD_PATH}` : 'Could not write the provisioning record to the tablet.');
 
-  log('done', 'Provisioning complete. Reboot the tablet to settle the changes, then check readiness on the Verify tab.');
-  return { backupFile: file, results, planned: { settings: plannedSettings.length, packages: plannedBloat.length, apps: plannedApps.length } };
+  log(ok ? 'done' : 'warn', ok
+    ? 'Provisioning complete. Reboot the tablet to settle the changes, then check readiness on the Check step.'
+    : 'Apply finished with steps that were not confirmed. Read the warnings before handing over this tablet.');
+  return { ok, backupFile: file, results, planned: { settings: plannedSettings.length, packages: plannedBloat.length, uninstalls: plan.uninstallPackages.length, apps: plannedApps.length } };
 }
 
 // ---------------------------------------------------------------------------
@@ -862,6 +956,8 @@ function listBackups(serial) {
         serial: meta.serial || '',
         settings: (meta.settings || []).length,
         packages: (meta.packages || []).length,
+        deletions: (meta.deletions || []).filter(p => p.status === 'deleted').length,
+        unconfirmedDeletions: (meta.deletions || []).filter(p => !['deleted', 'skipped'].includes(p.status)).length,
         aggressive: !!meta.aggressive,
       };
     })
@@ -879,20 +975,36 @@ async function revert(serial, file, onProgress = () => {}) {
   }
 
   log('info', `Reverting from ${path.basename(file)}...`);
+  let confirmed = true;
+  for (const deletion of backup.deletions || []) {
+    if (deletion.status === 'skipped') continue;
+    log('warn', `${deletion.pkg} was marked for permanent deletion in this run. Bench cannot restore the app or its data. Reinstall and set it up separately if it is needed.`);
+  }
+
+  if (backup.wallpaper) {
+    await wallpaper.restore(serial, backup.wallpaper, log);
+    log('ok', 'Previous home and lock wallpapers restored and read back.');
+  }
 
   for (const s of backup.settings || []) {
+    let r;
     if (s.previous == null) {
-      const r = await adb.deleteSetting(serial, s.scope, s.key);
-      log(r.ok ? 'ok' : 'warn', `${s.scope}/${s.key} -> unset`);
+      r = await adb.deleteSetting(serial, s.scope, s.key);
     } else {
-      const r = await adb.putSetting(serial, s.scope, s.key, s.previous);
-      log(r.ok ? 'ok' : 'warn', `${s.scope}/${s.key} -> ${s.previous}`);
+      r = await adb.putSetting(serial, s.scope, s.key, s.previous);
     }
+    const readBack = await adb.getSetting(serial, s.scope, s.key);
+    const ok = r.ok && valuesEqual(readBack, s.previous);
+    confirmed = confirmed && ok;
+    log(ok ? 'ok' : 'warn', `${s.scope}/${s.key} -> ${s.previous == null ? 'unset' : s.previous}${ok ? '' : ' (not confirmed)'}`);
   }
 
   for (const p of backup.packages || []) {
     const r = await adb.enablePackage(serial, p.pkg);
-    log(r.ok ? 'ok' : 'warn', `Re-enabled ${p.pkg}`);
+    const enabled = await adb.shell('pm list packages -e --user 0', { serial });
+    const ok = r.ok && enabled.ok && adb.parsePackageList(enabled.stdout).has(p.pkg);
+    confirmed = confirmed && ok;
+    log(ok ? 'ok' : 'warn', `${p.pkg}: ${ok ? 're-enabled and read back' : 'could not confirm it is enabled'}`);
   }
 
   for (const a of backup.appTuning || []) {
@@ -926,8 +1038,8 @@ async function revert(serial, file, onProgress = () => {}) {
     log('ok', `Screen brightness restored to ${backup.brightness.current}`);
   }
 
-  log('done', 'Revert complete. Reboot the tablet.');
-  return { file };
+  log(confirmed ? 'done' : 'warn', confirmed ? 'Reversible changes restored. Deleted apps and their data are not restored. Reboot the tablet.' : 'Revert finished with unconfirmed steps. Read the warnings.');
+  return { file, ok: confirmed };
 }
 
 // ---------------------------------------------------------------------------
@@ -1033,16 +1145,10 @@ async function installApp(serial, apkPath, opts = {}, onProgress = () => {}) {
 const WALLPAPER_DEVICE_DIR = '/sdcard/Download';
 
 /**
- * Get a wallpaper onto the tablet and open the "Set as" chooser with it
- * already loaded.
- *
- * This is deliberately NOT part of Apply. Android gives adb no way to set the
- * wallpaper image outright (see the note in adb.js), so this always ends with
- * the operator tapping "Set as wallpaper" on the tablet. Burying a step that
- * needs a human inside a batch that otherwise runs unattended would make Apply
- * a liar about having finished.
+ * Save the previous wallpaper, use WallpaperManager through the USB helper,
+ * and confirm home and lock IDs. A picker fallback is pending, never success.
  */
-async function setWallpaper(serial, localPath, onProgress = () => {}) {
+async function setWallpaper(serial, localPath, onProgress = () => {}, rollback = null) {
   const log = (level, message) => onProgress({ level, message });
 
   if (!fs.existsSync(localPath)) {
@@ -1075,9 +1181,23 @@ async function setWallpaper(serial, localPath, onProgress = () => {}) {
     return { ok: false, error: 'blocked by device policy', blockedBy: admin || null };
   }
 
+  const file = rollback ? rollback.file : backupPath(serial);
+  const backup = rollback ? rollback.backup : { tool: 'panda-bench', serial, timestamp: new Date().toISOString(), settings: [], packages: [] };
+  try {
+    log('info', 'Saving the old wallpaper and setting home and lock screens...');
+    const result = await wallpaper.apply(serial, localPath, `${file}.wallpaper`, saved => {
+      backup.wallpaper = saved;
+      fs.writeFileSync(file, JSON.stringify(backup, null, 2), 'utf8');
+    }, log);
+    log('ok', `Home and lock wallpapers confirmed by the tablet (IDs ${result.homeId} and ${result.lockId}).`);
+    return { ...result, backupFile: file };
+  } catch (error) {
+    log('warn', `Automatic wallpaper was not confirmed: ${error.message}. Opening the picker as a fallback.`);
+  }
+
   const basename = `panda-wallpaper${path.extname(localPath) || '.png'}`;
   const devicePath = `${WALLPAPER_DEVICE_DIR}/${basename}`;
-  const mime = path.extname(localPath).toLowerCase() === '.jpg' ? 'image/jpeg' : 'image/png';
+  const mime = /\.jpe?g$/i.test(localPath) ? 'image/jpeg' : 'image/png';
 
   log('info', `Pushing ${path.basename(localPath)} to the tablet...`);
   const pushed = await adb.pushFile(serial, localPath, devicePath);
@@ -1090,7 +1210,12 @@ async function setWallpaper(serial, localPath, onProgress = () => {}) {
   // Without this the file has no content:// identity and the chooser silently
   // refuses to open it.
   await adb.indexInMediaStore(serial, devicePath);
-  const mediaId = await adb.findMediaId(serial, devicePath);
+  let mediaId;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    mediaId = await adb.findMediaId(serial, devicePath);
+    if (mediaId) break;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
   if (!mediaId) {
     log('warn', 'The tablet did not index the image. It is on the tablet in Downloads - set it from the Gallery by hand.');
     return { ok: false, error: 'not indexed', devicePath };
@@ -1103,8 +1228,8 @@ async function setWallpaper(serial, localPath, onProgress = () => {}) {
     return { ok: false, error: 'chooser failed', devicePath };
   }
 
-  log('done', `The tablet is showing ${opened.via} with this image. Tap Set wallpaper, then choose Home screen.`);
-  return { ok: true, devicePath, uri, via: opened.via };
+  log('warn', `The tablet opened ${opened.via}. Wallpaper is not confirmed. Finish setting home and lock screens on the tablet.`);
+  return { ok: false, pending: true, devicePath, uri, via: opened.via, backupFile: backup.wallpaper ? file : null };
 }
 
 // ---------------------------------------------------------------------------
@@ -1816,6 +1941,7 @@ async function disableSelected(serial, packages, onProgress = () => {}) {
 }
 
 module.exports = {
+  packageNote,
   audit,
   driftCheck,
   disableSelected,

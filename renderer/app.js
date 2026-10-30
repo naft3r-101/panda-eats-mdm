@@ -583,6 +583,9 @@ function setBusy(busy) {
   $('setWallpaper').disabled = !ready || !state.install.selectedWallpaper || wallpaperLocked;
   $('setWallpaper').textContent = wallpaperLocked ? 'Blocked on this tablet' : 'Send to tablet';
   $('chooseWallpaper').disabled = busy;
+  $('queueWallpaper').disabled = !ready || !state.install.selectedWallpaper || wallpaperLocked;
+  $('chooseApplyWallpaper').disabled = !ready;
+  $('clearApplyWallpaper').disabled = !ready;
 
   for (const el of document.querySelectorAll('.revert-btn')) el.disabled = !ready;
   for (const el of document.querySelectorAll('.pick-row.check')) el.disabled = busy || !state.selected;
@@ -673,18 +676,18 @@ function renderPlan(planState) {
   const tiles = `
     <div class="tiles">
       ${tile('Settings', String(plan.settings.length), state.opts.skipSettings ? 'skipped' : 'to change', plan.settings.length ? 'warn' : 'good')}
-      ${tile('Packages', String(plan.packages.length), state.opts.skipBloat ? 'skipped' : 'to disable', plan.packages.length ? 'warn' : 'good')}
+      ${tile('Switch off', String(plan.packages.length), state.opts.skipBloat ? 'skipped' : 'can be restored', plan.packages.length ? 'warn' : 'good')}
+      ${tile('Delete for good', String(plan.uninstallPackages.length), state.opts.skipBloat ? 'skipped' : 'cannot be restored', plan.uninstallPackages.length ? 'bad' : 'good')}
       ${tile('Order app', String(plan.apps.length), state.opts.skipAppTuning ? 'skipped' : 'fixes needed', plan.apps.length ? 'bad' : 'good')}
-      ${tile('Protected', String(plan.blocked.length), 'never touched', 'good')}
     </div>`;
 
   if (plan.total === 0) {
     host.innerHTML = `${tiles}
       <div class="card">
         <div class="card-head"><h3>Plan</h3><span class="count">nothing to do</span></div>
-        <p class="card-note">This tablet already matches the profile${
+        <p class="card-note">No changes are queued${
           state.opts.skipSettings || state.opts.skipBloat || state.opts.skipAppTuning ? ', with the skips you have set' : ''
-        }. ${esc(report.device.model || report.device.serial)} is ready to hand over.</p>
+        }. Read the audit and run Check before handing over ${esc(report.device.model || report.device.serial)}.</p>
       </div>`;
     return;
   }
@@ -736,10 +739,13 @@ function renderPlan(planState) {
         ${section('Settings to change', plan.settings, settingRow, 20)}
         ${section('Levels to set', plan.levels || [], levelRow)}
         ${section('Lock screen', plan.lockScreen ? [plan.lockScreen] : [], levelRow)}
-        ${section('Packages to disable', plan.packages, packageRow)}
+        ${section('Wallpaper', plan.wallpaper ? [{ what: plan.wallpaper.name, current: 'current wallpaper', desired: 'home and lock screens' }] : [], levelRow)}
+        ${section('Apps to switch off', plan.packages, packageRow)}
+        ${section('Delete for good: apps and their data', plan.uninstallPackages, p => `<div class="row"><span class="row-key">${esc(p.pkg)}<br><small>${p.paths.map(esc).join('<br>')}</small></span>${chip('cannot undo', 'bad')}</div>`, Infinity)}
+        ${plan.uninstallPackages.length ? '<p class="card-note">Apply permanently deletes these apps and their data. Bench cannot bring them back. Check this list before pressing Apply.</p>' : ''}
         ${section('Order app fixes', plan.apps, appRow)}
       </div>
-      <p class="card-note">Nothing is uninstalled - packages are disabled for user 0 and come back with Revert. ${
+      <p class="card-note">Revert can restore settings and apps that were switched off. It cannot restore deleted apps or their data. ${
         plan.blocked.length
       } protected package(s) matched the profile and were excluded.</p>
     </div>`;
@@ -911,8 +917,10 @@ function renderAudit(report) {
       <div class="rows">${settingRows}</div>
     </div>`;
 
-  const toDisable = report.bloat.filter((b) => !b.disabled && !b.protected);
-  const alreadyOff = report.bloat.filter((b) => b.disabled);
+  const toDisable = report.bloat.filter((b) => !b.disabled && !b.protected && b.action === 'disable');
+  const toDelete = report.bloat.filter(b => !b.protected && b.action === 'uninstall');
+  const unknown = report.bloat.filter(b => !b.protected && b.action === 'unknown');
+  const alreadyOff = report.bloat.filter((b) => b.disabled && b.action === 'disable');
   const blocked = report.bloat.filter((b) => b.protected);
 
   const bloatRows = [
@@ -921,9 +929,10 @@ function renderAudit(report) {
       badge: chip(b.tier === 'aggressive' ? 'aggressive' : 'will disable', b.tier === 'aggressive' ? 'info' : 'warn'),
     })),
     ...blocked.map((b) => ({ b, badge: chip(`protected: ${b.protectedReason}`, 'bad') })),
+    ...unknown.map(b => ({ b, badge: chip('location unreadable: skipped', 'warn') })),
     ...alreadyOff.map((b) => ({ b, badge: chip('already off', 'muted') })),
   ]
-    .map(({ b, badge }) => `<div class="row"><span class="row-key">${esc(b.pkg)}</span>${badge}</div>`)
+    .map(({ b, badge }) => `<div class="row"><span class="row-key">${esc(b.pkg)}${b.note ? `<br><small>${esc(b.note)}</small>` : ''}</span>${badge}</div>`)
     .join('');
 
   const held = report.aggressiveHeld.length
@@ -932,12 +941,34 @@ function renderAudit(report) {
 
   const bloatCard = `
     <div class="card">
-      <div class="card-head"><h3>Bloat</h3><span class="count">${toDisable.length} to disable · ${alreadyOff.length} already off · ${blocked.length} protected</span></div>
+      <div class="card-head"><h3>Apps to switch off</h3><span class="count">${toDisable.length} to switch off · ${alreadyOff.length} already off · ${blocked.length} protected</span></div>
       <div class="rows">${bloatRows || '<div class="row"><span class="row-key">Nothing from the profile is present on this device.</span></div>'}</div>
       ${held}
     </div>`;
 
-  $('auditBody').innerHTML = managedCard + info + appCard + settingsCard + bloatCard;
+  const deleteCard = toDelete.length ? `<div class="card">
+    <div class="card-head"><h3>Apps to delete for good</h3>${chip(`${toDelete.length} cannot be restored`, 'bad')}</div>
+    <p class="card-note">These apps are named in the bloat profile and installed in /data/app. Apply deletes the apps and their data. Revert cannot restore them.</p>
+    <div class="rows">${toDelete.map(b => `<div class="row"><span class="row-key">${esc(b.pkg)}${b.note ? `<br><small>${esc(b.note)}</small>` : ''}<br><small>${b.paths.map(esc).join('<br>')}</small></span>${chip('delete for good', 'bad')}</div>`).join('')}</div>
+  </div>` : '';
+
+  const survival = report.backgroundSurvival;
+  const survivalCard = survival ? `<div class="card">
+    <div class="card-head"><h3>Background survival</h3>${chip(survival.ok ? 'DuraSpeed off' : 'needs Apply', survival.ok ? 'ok' : 'warn')}</div>
+    <p class="card-note">DuraSpeed can close the order app. Its app is ${survival.packageDisabled ? 'disabled' : 'enabled'}.
+    ${survival.settings.map(s => `${esc(s.scope)} control: ${esc(s.current == null ? 'unset' : s.current)} (wanted: 0)`).join('. ')}.</p>
+  </div>` : '';
+  const protection = report.batteryProtection;
+  const protectionCard = protection ? `<div class="card">
+    <div class="card-head"><h3>Battery longevity</h3>${chip(protection.supported === false ? 'not confirmed' : protection.ok ? '60% limit on' : 'needs Apply', protection.ok ? 'ok' : 'warn')}</div>
+    <p class="card-note">Lenovo Battery protection mode stops charging at 60%. ${protection.supported === false
+      ? 'This tablet did not expose the verified control. Check Settings > Battery on the tablet.'
+      : `Battery protection is ${protection.ok ? 'on' : 'off'}. Read from the tablet: ${esc(protection.current)}.`}</p>
+  </div>` : '';
+  const previousOperator = report.bloat.filter(b => b.note && /Grubhub|SureLock/.test(b.note));
+  const previousCard = previousOperator.length ? `<div class="card"><div class="card-head"><h3>Previous operator software</h3></div>
+    ${previousOperator.map(b => `<p class="card-note">${esc(b.note)} ${b.protected ? 'It is protected and will be left alone.' : b.action === 'uninstall' ? 'Apply will delete it for good.' : b.action === 'unknown' ? 'Its install location could not be read. It will be left alone.' : b.disabled ? 'It is disabled.' : 'Apply will switch it off.'}</p>`).join('')}</div>` : '';
+  $('auditBody').innerHTML = managedCard + survivalCard + protectionCard + previousCard + deleteCard + info + appCard + settingsCard + bloatCard;
   renderNotices();
   renderWallpaperBlock();
   setBusy(state.busy);
@@ -990,7 +1021,8 @@ $('runApply').addEventListener('click', async () => {
 
   setBusy(true);
   try {
-    await call(window.bench.apply, state.selected, { ...state.opts });
+    const outcome = await call(window.bench.apply, state.selected, { ...state.opts });
+    if (outcome.results.misc.some(r => r.step === 'wallpaper' && r.ok)) clearQueuedWallpaper();
     await loadBackups();
   } catch (err) {
     logLine({ level: 'error', message: err.message });
@@ -1306,6 +1338,26 @@ $('openWallpaper').addEventListener('click', () => {
   if (state.install.wallpapers.length === 0) loadWallpapers().catch(() => {});
   renderWallpaperBlock();
   openDialog('wallpaperModal');
+});
+
+$('chooseApplyWallpaper').addEventListener('click', () => $('openWallpaper').click());
+$('queueWallpaper').addEventListener('click', async () => {
+  const chosen = state.install.selectedWallpaper;
+  if (!chosen) return;
+  state.opts.wallpaperPath = chosen.path;
+  $('applyWallpaperChoice').textContent = `${chosen.name}: set home and lock screens when you press Apply.`;
+  $('clearApplyWallpaper').hidden = false;
+  closeDialog('wallpaperModal');
+  await applyPlanFromReport();
+});
+function clearQueuedWallpaper() {
+  delete state.opts.wallpaperPath;
+  $('applyWallpaperChoice').textContent = 'Keep the current wallpaper.';
+  $('clearApplyWallpaper').hidden = true;
+}
+$('clearApplyWallpaper').addEventListener('click', async () => {
+  clearQueuedWallpaper();
+  await applyPlanFromReport();
 });
 
 $('wallpaperDismiss').addEventListener('click', () => closeDialog('wallpaperModal'));
@@ -1839,7 +1891,7 @@ async function loadBackups() {
         ${backups
           .map((b) => {
             const when = b.timestamp ? new Date(b.timestamp).toLocaleString('en-US') : b.name;
-            const detail = `${b.settings} setting(s), ${b.packages} package(s)${b.aggressive ? ', aggressive' : ''}`;
+            const detail = `${b.settings} setting(s), ${b.packages} switched-off app(s), ${b.deletions || 0} permanent deletion(s)${b.unconfirmedDeletions ? `, ${b.unconfirmedDeletions} unconfirmed deletion attempt(s)` : ''}${b.aggressive ? ', aggressive' : ''}`;
             return `<div class="row">
                 <span class="row-key">${esc(when)}</span>
                 <span class="row-val">${esc(detail)}</span>
@@ -1848,7 +1900,7 @@ async function loadBackups() {
           })
           .join('')}
       </div>
-      <p class="card-note">Reverting restores every setting to the value it held before that run, re-enables every package that run disabled, and undoes the order-app background tuning.</p>
+      <p class="card-note">Revert restores saved settings, wallpapers, background tuning, and apps that were switched off. It cannot restore deleted apps or their data.</p>
     </div>`;
 
   for (const btn of $('rollbackBody').querySelectorAll('.revert-btn')) {

@@ -2,13 +2,14 @@
   "name": "panda-bench",
   "version": "0.7.1",
   "private": true,
-  "description": "Panda Bench - tablet provisioning workbench for Panda Eats order-taking tablets. Audits, debloats, and tunes an Android tablet over adb. No root, no factory reset, fully reversible.",
+  "description": "Panda Bench - tablet provisioning workbench for Panda Eats order-taking tablets. Audits, debloats, and tunes an Android tablet over adb. No root, no factory reset, permanent deletions shown before Apply.",
   "main": "electron/main.js",
   "author": "Rene Ruiz <reneruiz@getpandaeats.com>",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
     "test": "node --test \"test/**/*.test.js\"",
+    "build:wallpaper-helper": "node scripts/build-wallpaper-helper.js",
     "vendor:adb": "node scripts/fetch-platform-tools.js",
     "build": "node scripts/fetch-platform-tools.js && electron-builder --win --x64",
     "release": "node scripts/fetch-platform-tools.js --force && node scripts/ensure-release.js && electron-builder --win --x64 --publish always"
@@ -35,6 +36,10 @@
       "node_modules/**"
     ],
     "extraResources": [
+      {
+        "from": "build/wallpaper-helper.apk",
+        "to": "wallpaper-helper.apk"
+      },
       {
         "from": "profiles",
         "to": "profiles"

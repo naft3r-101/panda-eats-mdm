@@ -1,0 +1,5 @@
+# Only when com.mediatek.duraspeed is installed, regardless of manufacturer.
+# HGT502R3 DuraSpeed.apk reads System and writes BOTH keys.
+# /system/framework/duraspeed.jar watches Global and reads System on user switch.
+system setting.duraspeed.enabled 0
+global setting.duraspeed.enabled 0

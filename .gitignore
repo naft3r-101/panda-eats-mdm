@@ -16,3 +16,4 @@ vendor/
 # folder - so these are regenerable artifacts, and two 36 MB debug builds would
 # sit in git history forever for nothing.
 apk/
+build/*.idsig

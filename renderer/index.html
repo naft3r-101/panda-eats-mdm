@@ -179,6 +179,15 @@
                 <p class="empty">Select a tablet to see exactly what would change.</p>
               </div>
 
+              <div class="card">
+                <div class="card-head"><h3>Wallpaper with Apply</h3></div>
+                <p class="card-note" id="applyWallpaperChoice">Keep the current wallpaper.</p>
+                <div class="options">
+                  <button class="quiet-btn" id="chooseApplyWallpaper" type="button">Choose wallpaper...</button>
+                  <button class="quiet-btn" id="clearApplyWallpaper" type="button" hidden>Keep current wallpaper</button>
+                </div>
+              </div>
+
               <details class="options-fold" id="planOptionsFold">
                 <summary>
                   <span>What to change</span>
@@ -189,7 +198,7 @@
                     <span class="switch-track"><span class="switch-thumb"></span></span>
                     <span class="switch-text">
                       <strong>Aggressive tier</strong>
-                      <small>Also disable Photos, Drive, Maps, the Google app, Galaxy Store and similar. Bigger speed win, fewer features left.</small>
+                      <small>Also include Photos, Drive, Maps and similar. Installed apps are deleted for good; built-in apps are switched off.</small>
                     </span>
                   </button>
                   <button class="switch" role="switch" aria-checked="false" data-opt="skipSettings" type="button">
@@ -203,7 +212,7 @@
                     <span class="switch-track"><span class="switch-thumb"></span></span>
                     <span class="switch-text">
                       <strong>Skip debloat</strong>
-                      <small>Do not disable any packages on this run.</small>
+                      <small>Do not switch off or delete apps on this run.</small>
                     </span>
                   </button>
                   <button class="switch" role="switch" aria-checked="false" data-opt="skipAppTuning" type="button">
@@ -325,11 +334,13 @@
       <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="wallpaperTitle">
         <h3 id="wallpaperTitle">Set wallpaper</h3>
         <p class="modal-note">
-          Android gives adb no way to set the wallpaper outright, so this copies the image to the tablet and
-          opens its "Set as" chooser with the picture already loaded. Tap Set as wallpaper, then pick Home screen.
+          Choose a bundled wallpaper or your own image. Bench fills both home and lock screens with a
+          centered crop, keeps the image in proportion, and saves the old wallpaper for Revert.
+          If the tablet refuses, Bench opens its picker and reports that a tap is still needed.
         </p>
         <div id="wallpaperBlocked"></div>
         <div class="wallpapers" id="wallpapers"></div>
+        <button class="quiet-btn" id="queueWallpaper" type="button">Use this wallpaper with Apply</button>
         <div class="modal-foot">
           <button class="quiet-btn" id="chooseWallpaper" type="button">Use my own image...</button>
           <span class="modal-spacer"></span>
