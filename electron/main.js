@@ -24,11 +24,11 @@ function resolveStateDir() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 820,
+    width: 1360,
+    height: 900,
     minWidth: 940,
     minHeight: 640,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: '#F7F8F4',
     title: 'Panda Bench',
     icon: path.join(__dirname, '..', 'build', 'icon.ico'),
     show: false,

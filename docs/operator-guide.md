@@ -105,16 +105,35 @@ the installer and uploads it. Every bench PC picks it up the next time it starts
 
 ## The workflow
 
-Four numbered steps across the top, in the order a tablet goes through them: **Set up**,
-**Tune**, **Check**, **Ship**. Each step owns exactly one filled button, in the bar along the
-bottom. Everything that is not part of that line lives in one of the two menus.
+Four numbered steps on the left, in the order a tablet goes through them: **Set up**,
+**Tune tablet**, **Check readiness**, **Hand over**. The selected step has a coral background.
+The connected tablet and USB status stay at the top. Each step keeps its main button in the
+bottom bar, so it stays in reach while you scroll.
+
+Tune opens with **At a glance**: the order app, background controls, and battery protection.
+These are readings from the tablet, not a promise that it can take orders. **Installed** means
+the production app is present. Only Check readiness tests whether it is running and reachable.
+Missing or unsupported readings are never shown as confirmed.
+
+**Your plan** shows settings, apps to switch off, apps to delete for good, and order-app fixes.
+Setting changes have plain English labels, with their exact Android keys underneath. Permanent
+deletions appear first in a separate red panel, with every package and install path visible.
+**Make it feel like Panda** offers optional wallpapers. Its pictures are available choices,
+not a screenshot of the current tablet. **Customize this run** holds the extra-app and skip controls.
+**Tablet details** opens the full audit when you need the underlying readings.
+
+You can use the keyboard throughout: Up and Down move between workflow steps, Tab reaches
+controls, and Escape closes menus and dialogs. Windows down to 940 by 640 are supported.
+On a smaller window, the wallpaper and options move below the plan.
+
+See the [workspace screenshots and device checks](validation/bench-redesign-2026-10-30.md).
 
 ```
 1. Plug tablet in       -> verify: it appears in the sidebar with its model name, and the strip
                                    under its name says whether it was ever provisioned
 2. Step 1, Set up       -> verify: the order app is installed (Play, or an APK file)
 3. Step 2, Tune         -> verify: the plan lists every change it is about to make, and
-                                   "What the tablet looks like" shows why (read-only until Apply)
+                                   "Tablet details" shows why (read-only until Apply)
 4. Aggressive tier?     -> verify: the plan re-reads the tablet and the counts move
 5. Apply                -> verify: every line in the log drawer is a green check
 6. Reboot the tablet    -> verify: the plan re-reads to "Nothing to apply"
@@ -138,16 +157,15 @@ disagree about what "disable this package" means.
 
 ### Where everything else is
 
-Nothing was removed in the move to four steps; the once-a-month controls were gathered up so the
-forty-times-a-day ones stand alone.
+Nothing was removed in the move to four steps; the less-used controls are grouped so the everyday workflow stays easy to follow.
 
 | Menu | Holds |
 | ---- | ----- |
 | **Tablet actions**, top right | Set wallpaper, open the tablet's system update screen, reboot, power off |
 | **Bench settings**, bottom left | Check for updates, locate adb, open the profiles folder, open the rollback folder |
-| **Rollback & cleanup**, off the end of the step rail | Rollback points, and Discover - scanning for packages no profile covers |
+| **Restore & tools**, below the four steps on the left | Rollback points, and Discover - scanning for packages no profile covers |
 
-The **log** is one drawer along the bottom for the whole app rather than one per step. It opens
+The **Activity** drawer is along the bottom for the whole app. It opens
 itself the moment a run starts, and the bar keeps the last line visible when it is shut.
 
 The strip under the tablet's name is the only place a warning appears outside a step: an MDM
@@ -209,10 +227,11 @@ adb.
 
 ### Wallpaper with Apply
 
-In step 2, choose **Wallpaper with Apply > Choose wallpaper**. Pick counter, dark, light,
-or **Use my own image**, then **Use this wallpaper with Apply**. The plan includes the choice.
+In step 2, choose **Make it feel like Panda > Choose wallpaper**. Pick counter, dark, light,
+or **Use my own image**, then **Use with Apply**. The plan includes the choice.
 **Keep current wallpaper** removes it from the plan. Tablet actions > Set wallpaper also works
-on its own and creates its own rollback point.
+on its own and creates its own rollback point. That path offers **Send to tablet** instead;
+the chooser only shows the action for the path you opened.
 
 Bench installs a small helper with Android's normal SET_WALLPAPER permission. It saves the old
 home and lock images to the rollback folder before changing either. On Android 11 and later,
@@ -255,9 +274,9 @@ Settings > Battery. Storing an unused key is not proof of a charging limit.
 
 See [the HGT502R3 test record](validation/HGT502R3-2026-10-30.md) for device readbacks and screenshots.
 
-### Aggressive tier
+### Include extra apps
 
-Off by default. It adds a second list: Photos, Drive, Maps, Gmail,
+**Customize this run > Include extra apps** is off by default. This is the aggressive tier in the profile files. It adds a second list: Photos, Drive, Maps, Gmail,
 Galaxy Store, Samsung Cloud, Samsung Notes, and similar. Bigger speed win, but the tablet loses
 real features. Fine for a tablet that only ever runs the order app. Think twice if the restaurant
 uses it for anything else.
@@ -294,7 +313,7 @@ them separately before deletion. Rollback points record these deletions as perma
 apps that can be re-enabled. If needed later, reinstall and set up those apps separately.
 
 Every Apply writes a rollback point **before it touches the device**, so even a crash mid-run
-leaves a record of the run. Rollback & cleanup lists them per tablet. Reverting the reversible changes:
+leaves a record of the run. Restore & tools lists them per tablet. Reverting the reversible changes:
 
 - puts every setting back to the exact value it held (or unsets it, if it was unset)
 - re-enables every package that run disabled
@@ -357,7 +376,7 @@ and the printer database), a test order needs an endpoint in the backend, and jo
 adb is refused on One UI 6.1 (`connect-network` needs system rights). Those are order-app and
 backend cards, not bench ones.
 
-**Ship** is the last button. It writes the ticks into the tablet's record, then turns USB
+**Finish handover** is the last button, on Hand over. It writes the ticks into the tablet's record, then turns USB
 debugging off, because a counter tablet has an unlocked screen and with debugging on anyone with a
 cable can accept the prompt on that screen and do everything this tool does. It asks first and
 names anything still red or unticked; shipping anyway is allowed, and recorded. Putting the tablet
@@ -397,7 +416,7 @@ profiles/
 
 A `!` prefix on a line marks it aggressive-tier.
 
-To grow a list: run **Discover**, under Rollback & cleanup, against a real tablet. It shows every system package that
+To grow a list: choose **Scan this tablet**, under Restore & tools, against a real tablet. It shows every system package that
 no profile mentions and that is not protected. Paste the junk you recognise into the OEM file and
 re-audit. The Lenovo list in particular is thin and expects this.
 
@@ -440,7 +459,7 @@ The plan lists permanent deletions separately, including each package and its pa
 list before pressing Apply on a restaurant's tablet. Apply re-reads the profile, path, keyboard,
 launcher and protected list before each deletion. Afterward, it checks the installed package list
 to confirm the exact package is gone. A successful command alone is not proof. Disabled system
-apps are also read back. Skip debloat skips both kinds of action. Discover still only switches
+apps are also read back. **Leave apps alone** skips both kinds of action. Discover still only switches
 apps off; it cannot permanently delete packages that no bloat profile names.
 
 ### Writes that lie
@@ -591,8 +610,10 @@ electron/
   wallpaper.js   USB helper, wallpaper backup and readback
   play.js        what Play is serving, via the Developer API and the order app's service account
 renderer/
-  index.html     four tabs: Setup, Provision, Verify, Tools
-  styles.css     brand tokens mirroring the order app's Color.kt
+  index.html     Set up, Tune tablet, Check readiness, Hand over, Restore & tools
+  styles.css     shared control mechanics
+  workspace.css  light Panda Eats workspace and responsive layout
+  presentation.js plain English labels and conservative status summaries
   app.js         no framework
 wallpaper-helper/ small Android helper source, no network or background service
 profiles/        editable text, hot-loaded, no rebuild needed

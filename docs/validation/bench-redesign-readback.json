@@ -1,0 +1,105 @@
+{
+  "serial": "HGT502R3",
+  "date": "2026-10-30",
+  "checks": [
+    "Actual audit separates fixture deletion and system app disable",
+    "Leave apps alone excludes deletion and disable, then restores both",
+    "Wallpaper modal, queue, clear and requeue work",
+    "Real Apply deleted fixture, disabled demo app and set wallpaper with confirmed result",
+    "Vertical workflow supports arrow-key navigation",
+    "Setup, readiness, handover and restore screens render with real tablet data",
+    "Minimum 940 by 640 window keeps actions visible; wallpaper dialog scrolls",
+    "Wallpaper chooser has one action: queue with Apply or send now, according to entry point",
+    "Compact sidebar shows the device; wallpaper dialog keeps Close in view",
+    "Simulated disconnect clears prior status and disables Apply",
+    "Read error clears confirmed overview readings",
+    "Tablet menu opens and Escape closes it"
+  ],
+  "apply": {
+    "ok": true,
+    "results": {
+      "settings": [
+        {
+          "key": "global/app_standby_enabled",
+          "ok": true,
+          "readBack": "0",
+          "error": null
+        }
+      ],
+      "packages": [
+        {
+          "pkg": "com.motorola.demo",
+          "ok": true,
+          "oemProtected": false,
+          "error": null
+        }
+      ],
+      "uninstalls": [
+        {
+          "pkg": "com.benchfixture.disposable",
+          "ok": true,
+          "remainingPaths": [],
+          "error": null
+        }
+      ],
+      "appTuning": [],
+      "permissions": [],
+      "misc": [
+        {
+          "step": "media volume",
+          "ok": true
+        },
+        {
+          "step": "wallpaper",
+          "homeId": 21,
+          "lockId": 22,
+          "width": 800,
+          "height": 1280,
+          "ok": true,
+          "after": {
+            "homeId": 21,
+            "lockId": 22,
+            "readable": true
+          },
+          "backupFile": "D:\\Projects\\Panda Eats\\panda-eats-bench\\state\\HGT502R3-2026-10-30T07-19-43-743Z.json"
+        },
+        {
+          "step": "trim caches",
+          "ok": true
+        }
+      ],
+      "abortedAt": null
+    }
+  },
+  "standardProfileRestored": true,
+  "readback": {
+    "battery": "1",
+    "duraSystem": "0",
+    "duraGlobal": "0",
+    "fixturePresent": false,
+    "demoDisabled": true,
+    "wallpaperDump": "System wallpaper state:\n User 0: id=21\n Display state:\n  displayId=0\n  mWidth=1600  mHeight=1280\n  mPadding=Rect(0, 0 - 0, 0)\n  mCropHint=Rect(0, 0 - 800, 1280)\n  mName=\n  mAllowBackup=false\n  mWallpaperComponent=ComponentInfo{com.android.systemui/com.android.systemui.ImageWallpaper}\n  Wallpaper connection com.android.server.wallpaper.WallpaperManagerService$WallpaperConnection@1b39d0c:\n     mDisplayId=0\n     mToken=android.os.Binder@26e81a4\n     mEngine=android.service.wallpaper.IWallpaperEngine$Stub$Proxy@eb020a3\n    mService=android.service.wallpaper.IWallpaperService$Stub$Proxy@c01bfa0\n    mLastDiedTime=-1977854\nLock wallpaper state:\n User 0: id=22\n  mCropHint=Rect(0, 0 - 800, 1280)\n  mName=\n  mAllowBackup=false\nFallback wallpaper state:\n User 0: id=1\n  mCropHint=Rect(0, 0 - 0, 0)\n  mName=\n  mAllowBackup=false\n  Fallback Wallpaper connection com.android.server.wallpaper.WallpaperManagerService$WallpaperConnection@4366864:\n    mService=android.service.wallpaper.IWallpaperService$Stub$Proxy@7400e61\n    mLastDiedTime=-1977854"
+  },
+  "readiness": {
+    "ready": false,
+    "outstanding": [
+      {
+        "id": "printer",
+        "label": "Reaches the printer",
+        "status": "skip",
+        "detail": "Enter the printer's IP address to check. USB and Bluetooth printers have no address - skip this.",
+        "fix": null
+      },
+      {
+        "id": "lock",
+        "label": "No lock screen",
+        "status": "bad",
+        "detail": "Swipe to unlock is on, so orders hide behind a swipe after every reboot.",
+        "fix": "apply"
+      }
+    ]
+  },
+  "rendererErrors": [],
+  "unitTests": 69,
+  "windowsUnpackedBuild": "passed, publishing disabled"
+}

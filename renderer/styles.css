@@ -1,11 +1,6 @@
-/* Panda Bench - brand tokens mirror the order-taking app's ui/theme/Color.kt:
-   zinc for structure, emerald for good, red for bad, sky for info, amber for
-   caution. The brand main colour is black, not blue.
-
-   Layout rule the whole file follows: the window is a fixed frame - sidebar,
-   topbar, step rail, action bar - and only the middle scrolls. A button never
-   moves because a list above it got longer, so the one that matters is always
-   in the same place. */
+/* Shared controls and interaction states. workspace.css supplies the light
+   Panda Eats theme and responsive workflow layout. The main action stays in
+   a fixed bottom bar while each step's content scrolls. */
 
 :root {
   --zinc-900: #18181b;
