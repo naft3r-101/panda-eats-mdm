@@ -21,6 +21,7 @@ const state = {
   devices: [],
   selected: null,
   report: null,
+  readAt: null,
   plan: null,
   busy: false,
   opts: { aggressive: false, skipSettings: false, skipBloat: false, skipAppTuning: false },
@@ -114,6 +115,8 @@ const tile = (label, value, sub, kind) => `
     <div class="tile-sub">${esc(sub)}</div>
   </div>`;
 
+const icon = name => `<svg class="icon" aria-hidden="true"><use href="icons.svg#${name}" /></svg>`;
+
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // --------------------------------------------------------------------------
@@ -162,8 +165,8 @@ for (const tab of tabs) {
   tab.addEventListener('keydown', (event) => {
     const index = tabs.indexOf(tab);
     let next = null;
-    if (event.key === 'ArrowRight') next = tabs[(index + 1) % tabs.length];
-    if (event.key === 'ArrowLeft') next = tabs[(index - 1 + tabs.length) % tabs.length];
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = tabs[(index + 1) % tabs.length];
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = tabs[(index - 1 + tabs.length) % tabs.length];
     if (event.key === 'Home') next = tabs[0];
     if (event.key === 'End') next = tabs[tabs.length - 1];
     if (next) {
@@ -325,12 +328,12 @@ function renderFoldSummaries() {
   $('installOptionsSummary').textContent = installOn.length ? installOn.join(', ') : 'all off';
 
   const plan = [
-    state.opts.aggressive ? 'aggressive tier' : null,
+    state.opts.aggressive ? 'extra apps included' : null,
     state.opts.skipSettings ? 'settings skipped' : null,
-    state.opts.skipBloat ? 'debloat skipped' : null,
+    state.opts.skipBloat ? 'apps left alone' : null,
     state.opts.skipAppTuning ? 'app tuning skipped' : null,
   ].filter(Boolean);
-  $('planOptionsSummary').textContent = plan.length ? plan.join(', ') : 'the standard counter profile';
+  $('planOptionsSummary').textContent = plan.length ? plan.join(', ') : 'Standard counter setup';
 }
 
 // --------------------------------------------------------------------------
@@ -339,6 +342,7 @@ function renderFoldSummaries() {
 
 function renderDevices() {
   const host = $('devices');
+  $('deviceCount').textContent = state.devices.length;
   if (state.devices.length === 0) {
     host.innerHTML =
       '<p class="empty">No tablet detected.<br />Connect over USB and accept the "Allow USB debugging" prompt on the tablet.</p>';
@@ -366,7 +370,10 @@ function renderDevices() {
 }
 
 function selectDevice(serial) {
+  if (state.busy) return;
   state.selected = serial;
+  state.readAt = null;
+  $('runOutcome').hidden = true;
   state.report = null;
   state.plan = null;
 
@@ -510,7 +517,22 @@ async function refreshDevices() {
         state.selected = null;
         state.report = null;
         state.plan = null;
-        $('deviceTitle').textContent = 'No tablet selected';
+        state.readAt = null;
+        state.drift = null;
+        state.verify.report = null;
+        state.verify.handover = null;
+        state.install.inspect = null;
+        $('runOutcome').hidden = true;
+        $('deviceTitle').textContent = 'Let’s connect a tablet';
+        $('deviceSubtitle').textContent = 'Plug in over USB, then allow debugging on the tablet.';
+        $('auditBody').innerHTML = '<p class="empty">Connect a tablet to read its details.</p>';
+        $('verifyBody').innerHTML = '<p class="empty">Connect a tablet to check whether it can take orders.</p>';
+        $('checklistBody').innerHTML = '';
+        $('installedApps').innerHTML = '';
+        $('installSelected').innerHTML = '';
+        $('discoverBody').innerHTML = '<p class="empty">Connect a tablet to look at its apps.</p>';
+        renderShip();
+        renderNotices();
         renderPlan(null);
         renderDevices();
         setBusy(false);
@@ -539,6 +561,9 @@ function setBusy(busy) {
 
   // Step 2
   $('refreshPlan').disabled = !ready;
+  $('connectionState').textContent = state.selected ? (busy ? 'Working with tablet' : 'USB connected') : 'Waiting for USB';
+  $('connectionState').classList.toggle('connected', Boolean(state.selected));
+  for (const device of document.querySelectorAll('.device')) device.disabled = busy || device.classList.contains('device-unusable');
   $('runApply').disabled = !ready || !state.plan || state.plan.total === 0;
 
   // Step 1. One button, and what it says depends on where the app is coming
@@ -611,6 +636,7 @@ async function refreshPlan() {
   try {
     const result = await call(window.bench.preview, state.selected, { ...state.opts });
     state.report = result.report;
+    state.readAt = new Date();
     state.plan = result.plan;
     renderPlan({ report: state.report, plan: state.plan });
     renderAudit(state.report);
@@ -645,21 +671,33 @@ async function applyPlanFromReport() {
   setBusy(state.busy);
 }
 
+function renderOverview(planState) {
+  const report = planState && planState.report;
+  $('auditStamp').textContent = report && state.readAt ? 'Read at ' + state.readAt.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'}) : planState === 'loading' ? 'Reading the tablet…' : 'No current reading';
+  const items = report ? BenchPresentation.overview(report) : [
+    {title:'Order app', value:'Waiting for a reading', detail:'Installation and app access', icon:'bag'},
+    {title:'Background activity', value:'Waiting for a reading', detail:'Controls that can interrupt orders', icon:'pulse'},
+    {title:'Battery protection', value:'Waiting for a reading', detail:'Charging controls for this tablet', icon:'battery'},
+  ];
+  $('quickStatus').innerHTML = items.map(item => '<section class="status-card ' + (item.kind || '') + '"><div class="status-top">' + icon(item.icon) + '<span>' + esc(item.title) + '</span></div><strong>' + esc(item.value) + '</strong><p>' + esc(item.detail) + '</p></section>').join('');
+}
+
 function renderPlan(planState) {
   const host = $('plan');
+  renderOverview(planState);
 
   if (!state.selected) {
-    host.innerHTML = '<p class="empty">Select a tablet to see exactly what would change.</p>';
+    host.innerHTML = `<div class="welcome-card"><div class="section-icon">${icon('cable')}</div><h3>Your next tablet starts here.</h3><p>Connect a tablet and we’ll put together a plan. Nothing changes until you choose Apply.</p><ol class="connect-steps"><li>Connect the tablet with a USB cable.</li><li>Turn on USB debugging in Developer options.</li><li>Tap <strong>Allow</strong> on the tablet’s debugging prompt.</li></ol></div>`;
     $('runApply').textContent = 'Apply to tablet';
     return;
   }
   if (planState === 'loading') {
-    host.innerHTML = '<p class="empty">Reading the tablet...</p>';
+    host.innerHTML = `<div class="welcome-card loading"><div class="section-icon">${icon('tablet')}</div><h3>Getting to know this tablet.</h3><p>Checking apps, settings, and background access. This only reads the tablet.</p></div>`;
     $('runApply').textContent = 'Reading tablet...';
     return;
   }
   if (planState && planState.error) {
-    host.innerHTML = `<p class="empty">Could not read the tablet: ${esc(planState.error)}</p>`;
+    host.innerHTML = `<div class="welcome-card"><h3>We couldn’t read this tablet.</h3><p>${esc(planState.error)}</p><p>Check the USB cable and debugging prompt, then choose Re-read tablet.</p></div>`;
     $('runApply').textContent = 'Apply to tablet';
     return;
   }
@@ -674,8 +712,9 @@ function renderPlan(planState) {
   $('runApply').textContent = plan.total === 0 ? 'Nothing to apply' : `Apply ${plural(plan.total, 'change')}`;
 
   const tiles = `
+    <div class="plan-intro"><div><h3>Your plan</h3><p>${plan.total ? `${plural(plan.total, 'change')} to review before you apply.` : 'No changes queued. Readiness is checked in the next step.'}</p></div>${chip('Review first', 'muted')}</div>
     <div class="tiles">
-      ${tile('Settings', String(plan.settings.length), state.opts.skipSettings ? 'skipped' : 'to change', plan.settings.length ? 'warn' : 'good')}
+      ${tile('Settings', String(plan.settings.length + (plan.levels || []).length + (plan.lockScreen ? 1 : 0)), state.opts.skipSettings ? 'skipped' : 'to change', plan.settings.length ? 'warn' : 'good')}
       ${tile('Switch off', String(plan.packages.length), state.opts.skipBloat ? 'skipped' : 'can be restored', plan.packages.length ? 'warn' : 'good')}
       ${tile('Delete for good', String(plan.uninstallPackages.length), state.opts.skipBloat ? 'skipped' : 'cannot be restored', plan.uninstallPackages.length ? 'bad' : 'good')}
       ${tile('Order app', String(plan.apps.length), state.opts.skipAppTuning ? 'skipped' : 'fixes needed', plan.apps.length ? 'bad' : 'good')}
@@ -697,7 +736,7 @@ function renderPlan(planState) {
     const shown = items.slice(0, cap);
     const more = items.length - shown.length;
     return `
-      <div class="plan-group">
+      <div class="plan-group ${title.startsWith('Delete for good') ? 'destructive' : ''}">
         <div class="plan-group-head">${esc(title)} <span class="count">${items.length}</span></div>
         <div class="rows">
           ${shown.map(render).join('')}
@@ -708,11 +747,11 @@ function renderPlan(planState) {
 
   const settingRow = (s) => `
     <div class="row">
-      <span class="row-key">${esc(s.scope)}/${esc(s.key)}</span>
+      <span class="row-key friendly">${esc(BenchPresentation.settingLabel(s))}<br><small>${esc(s.scope)}/${esc(s.key)}</small></span>
       <span class="row-val">${esc(s.current == null ? 'unset' : s.current)} &rarr; <strong>${esc(s.desired)}</strong></span>
     </div>`;
 
-  const packageRow = (pkg) => `<div class="row"><span class="row-key">${esc(pkg)}</span>${chip('disable', 'warn')}</div>`;
+  const packageRow = (pkg) => `<div class="row"><span class="row-key friendly">${esc(BenchPresentation.packageLabel(pkg))}<br><small>${esc(pkg)}</small></span>${chip('switch off', 'warn')}</div>`;
 
   const levelRow = (l) => `
     <div class="row">
@@ -722,9 +761,9 @@ function renderPlan(planState) {
 
   const appRow = (a) => {
     const missing = [];
-    if (!a.dozeExempt) missing.push('doze exemption');
-    if (!a.bucketOk) missing.push(`bucket ${bucketName(a.standbyBucket)} &rarr; active`);
-    if (!a.opsOk) missing.push('background ops');
+    if (!a.dozeExempt) missing.push('allow running during sleep');
+    if (!a.bucketOk) missing.push('keep the app active');
+    if (!a.opsOk) missing.push('allow background activity');
     for (const label of deniedPermissions(a)) missing.push(`grant ${esc(label)}`);
     return `<div class="row"><span class="row-key">${esc(a.pkg)}</span><span class="row-val">${missing.join(', ')}</span></div>`;
   };
@@ -732,17 +771,17 @@ function renderPlan(planState) {
   host.innerHTML = `${tiles}
     <div class="card">
       <div class="card-head">
-        <h3>Plan</h3>
+        <h3>What Apply will do</h3>
         <span class="count">${esc(report.device.model || report.device.serial)} · ${esc(report.profileSources.join(' + '))}</span>
       </div>
       <div class="card-body">
+        ${section('Delete for good: apps and their data', plan.uninstallPackages, p => `<div class="row"><span class="row-key friendly">${esc(BenchPresentation.packageLabel(p.pkg))}<br><small>${esc(p.pkg)}<br>${p.paths.map(esc).join('<br>')}</small></span>${chip('cannot undo', 'bad')}</div>`, Infinity)}
+        ${plan.uninstallPackages.length ? '<p class="delete-warning"><strong>These apps and their data will be permanently deleted.</strong> Bench cannot bring them back. Check every app in this list before pressing Apply.</p>' : ''}
         ${section('Settings to change', plan.settings, settingRow, 20)}
         ${section('Levels to set', plan.levels || [], levelRow)}
         ${section('Lock screen', plan.lockScreen ? [plan.lockScreen] : [], levelRow)}
         ${section('Wallpaper', plan.wallpaper ? [{ what: plan.wallpaper.name, current: 'current wallpaper', desired: 'home and lock screens' }] : [], levelRow)}
         ${section('Apps to switch off', plan.packages, packageRow)}
-        ${section('Delete for good: apps and their data', plan.uninstallPackages, p => `<div class="row"><span class="row-key">${esc(p.pkg)}<br><small>${p.paths.map(esc).join('<br>')}</small></span>${chip('cannot undo', 'bad')}</div>`, Infinity)}
-        ${plan.uninstallPackages.length ? '<p class="card-note">Apply permanently deletes these apps and their data. Bench cannot bring them back. Check this list before pressing Apply.</p>' : ''}
         ${section('Order app fixes', plan.apps, appRow)}
       </div>
       <p class="card-note">Revert can restore settings and apps that were switched off. It cannot restore deleted apps or their data. ${
@@ -936,7 +975,7 @@ function renderAudit(report) {
     .join('');
 
   const held = report.aggressiveHeld.length
-    ? `<p class="card-note">${report.aggressiveHeld.length} further package(s) are held back by the aggressive tier. Turn on the aggressive tier under "What to change" to include them.</p>`
+    ? `<p class="card-note">${report.aggressiveHeld.length} extra app(s) are left alone. Choose "Customize this run > Include extra apps" to review them.</p>`
     : '';
 
   const bloatCard = `
@@ -1019,9 +1058,15 @@ $('clearLog').addEventListener('click', () => {
 $('runApply').addEventListener('click', async () => {
   if (!state.selected || !state.plan || state.plan.total === 0) return;
 
+  $('runOutcome').hidden = true;
   setBusy(true);
   try {
     const outcome = await call(window.bench.apply, state.selected, { ...state.opts });
+    $('runOutcome').hidden = false;
+    $('runOutcome').className = `run-outcome ${outcome.ok === true ? 'ok' : 'warn'}`;
+    $('runOutcome').innerHTML = outcome.ok === true
+      ? `${icon('check')}<div><strong>Changes checked on the tablet.</strong><p>Next, reboot from Tablet actions and run Check readiness.</p></div>`
+      : `${icon('shield')}<div><strong>Some changes still need attention.</strong><p>Open Activity for the results. Bench could not confirm every change.</p></div>`;
     if (outcome.results.misc.some(r => r.step === 'wallpaper' && r.ok)) clearQueuedWallpaper();
     await loadBackups();
   } catch (err) {
@@ -1278,6 +1323,15 @@ async function loadWallpapers() {
     state.install.selectedWallpaper = res.wallpapers[0];
   }
   renderWallpapers();
+  renderWallpaperPreview();
+}
+
+function renderWallpaperPreview() {
+  const chosen = state.install.wallpapers.find(w => w.path === state.opts.wallpaperPath);
+  const images = chosen ? [chosen] : state.install.wallpapers.slice(0,3);
+  const host = $('wallpaperPreview');
+  host.classList.toggle('has-choice', Boolean(chosen));
+  host.innerHTML = images.map(w => `<img src="${esc(fileUrl(w.preview || w.path))}" alt="" />`).join('');
 }
 
 function renderWallpapers() {
@@ -1334,19 +1388,24 @@ $('setWallpaper').addEventListener('click', async () => {
   }
 });
 
-$('openWallpaper').addEventListener('click', () => {
+function openWallpaperPicker(mode) {
   if (state.install.wallpapers.length === 0) loadWallpapers().catch(() => {});
+  $('queueWallpaper').hidden = mode !== 'apply';
+  $('setWallpaper').hidden = mode === 'apply';
   renderWallpaperBlock();
   openDialog('wallpaperModal');
-});
+}
 
-$('chooseApplyWallpaper').addEventListener('click', () => $('openWallpaper').click());
+$('openWallpaper').addEventListener('click', () => openWallpaperPicker('now'));
+
+$('chooseApplyWallpaper').addEventListener('click', () => openWallpaperPicker('apply'));
 $('queueWallpaper').addEventListener('click', async () => {
   const chosen = state.install.selectedWallpaper;
   if (!chosen) return;
   state.opts.wallpaperPath = chosen.path;
   $('applyWallpaperChoice').textContent = `${chosen.name}: set home and lock screens when you press Apply.`;
   $('clearApplyWallpaper').hidden = false;
+  renderWallpaperPreview();
   closeDialog('wallpaperModal');
   await applyPlanFromReport();
 });
@@ -1354,6 +1413,7 @@ function clearQueuedWallpaper() {
   delete state.opts.wallpaperPath;
   $('applyWallpaperChoice').textContent = 'Keep the current wallpaper.';
   $('clearApplyWallpaper').hidden = true;
+  renderWallpaperPreview();
 }
 $('clearApplyWallpaper').addEventListener('click', async () => {
   clearQueuedWallpaper();
@@ -1682,19 +1742,19 @@ function renderShip() {
 
   if (!state.selected) {
     host.innerHTML = '<p class="empty">Select a tablet.</p>';
-    button.textContent = 'Ship tablet';
+    button.textContent = 'Finish handover';
     return;
   }
   if (!state.verify.report) {
     host.innerHTML =
-      '<p class="empty">Check readiness on step 3 first. Ship writes those results into the tablet\'s own record, so it needs them.</p>';
-    button.textContent = 'Ship tablet';
+      '<p class="empty">Run Check readiness first. Handover saves those results on the tablet.</p>';
+    button.textContent = 'Finish handover';
     return;
   }
 
   const unmet = shipUnmet();
   const report = state.verify.report;
-  button.textContent = unmet.length === 0 ? 'Ship tablet' : `Ship anyway, ${plural(unmet.length, 'thing')} outstanding`;
+  button.textContent = unmet.length === 0 ? 'Finish handover' : `Review ${plural(unmet.length, 'thing')} before handover`;
 
   const rows = unmet.length
     ? `<div class="rows">${unmet
@@ -1716,7 +1776,7 @@ function renderShip() {
         unmet.length === 0 ? 'nothing left' : 'named in the record',
         unmet.length === 0 ? 'good' : 'warn'
       )}
-      ${tile('USB debugging', report.usbDebugging === false ? 'Off' : 'On', report.usbDebugging === false ? 'already off' : 'Ship turns it off', 'good')}
+      ${tile('USB debugging', report.usbDebugging === false ? 'Off' : 'On', report.usbDebugging === false ? 'already off' : 'Handover turns it off', 'good')}
     </div>
     <div class="card">
       <div class="card-head">
@@ -1895,7 +1955,7 @@ async function loadBackups() {
             return `<div class="row">
                 <span class="row-key">${esc(when)}</span>
                 <span class="row-val">${esc(detail)}</span>
-                <button class="ghost-btn revert-btn" data-file="${esc(b.file)}" type="button">Revert to this</button>
+                <button class="quiet-btn revert-btn" data-file="${esc(b.file)}" type="button">Restore saved changes</button>
               </div>`;
           })
           .join('')}
@@ -2120,6 +2180,8 @@ showAppVersion();
 showUpdateStatus();
 showAdbStatus();
 renderDevices();
+renderPlan(null);
+loadWallpapers().catch(() => {});
 renderFoldSummaries();
 renderSource();
 renderShip();

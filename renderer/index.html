@@ -5,6 +5,7 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: file:;" />
     <title>Panda Bench</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="workspace.css" />
   </head>
   <body>
     <!--
@@ -25,13 +26,31 @@
           <img class="brand-mark" src="brand-64.png" alt="" aria-hidden="true" />
           <div>
             <h1>Panda Bench</h1>
-            <p>Tablet provisioning <span class="brand-version" id="appVersion"></span></p>
+            <p>For a better shift <span class="brand-version" id="appVersion"></span></p>
           </div>
         </header>
 
+        <p class="nav-label">YOUR WORKFLOW</p>
+        <nav class="steps" role="tablist" aria-label="Bench steps" aria-orientation="vertical">
+          <button class="step" role="tab" id="tab-install" aria-controls="panel-install" aria-selected="false" tabindex="-1" type="button">
+            <span class="step-n">1</span><span class="step-copy"><span class="step-name">Set up</span><span class="step-description">Install the order app</span></span>
+          </button>
+          <button class="step" role="tab" id="tab-provision" aria-controls="panel-provision" aria-selected="true" type="button">
+            <span class="step-n">2</span><span class="step-copy"><span class="step-name">Tune tablet</span><span class="step-description">Prepare for the counter</span></span>
+          </button>
+          <button class="step" role="tab" id="tab-verify" aria-controls="panel-verify" aria-selected="false" tabindex="-1" type="button">
+            <span class="step-n">3</span><span class="step-copy"><span class="step-name">Check readiness</span><span class="step-description">Make sure it all works</span></span>
+          </button>
+          <button class="step" role="tab" id="tab-ship" aria-controls="panel-ship" aria-selected="false" tabindex="-1" type="button">
+            <span class="step-n">4</span><span class="step-copy"><span class="step-name">Hand over</span><span class="step-description">Finish up and unplug</span></span>
+          </button>
+          <button class="step step-aside" role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="false" tabindex="-1" type="button">
+            <span class="step-n"><svg class="icon" aria-hidden="true"><use href="icons.svg#restore" /></svg></span><span class="step-copy"><span class="step-name">Restore &amp; tools</span><span class="step-description">History and extra controls</span></span>
+          </button>
+        </nav>
         <div class="sidebar-section">
           <div class="sidebar-heading">
-            <h2>Tablets</h2>
+            <h2>Connected tablets <span id="deviceCount">0</span></h2>
             <button class="link-btn" id="refresh" type="button">Refresh</button>
           </div>
           <div class="devices" id="devices" role="radiogroup" aria-label="Connected tablets"></div>
@@ -62,11 +81,11 @@
       <!-- ---------------------------------------------------------------- -->
       <main class="main">
         <div class="topbar">
-          <div class="device-title">
-            <h2 id="deviceTitle">No tablet selected</h2>
+          <div class="device-identity"><span class="device-symbol"><svg class="icon" aria-hidden="true"><use href="icons.svg#tablet" /></svg></span><div class="device-title">
+            <span class="eyebrow">YOUR TABLET</span><h2 id="deviceTitle">Let’s connect a tablet</h2>
             <p id="deviceSubtitle">Plug a tablet in over USB and accept the debugging prompt on its screen.</p>
           </div>
-          <div class="menu" data-menu>
+          </div><div class="topbar-actions"><span class="connection-state" id="connectionState">Waiting for USB</span><div class="menu" data-menu>
             <button class="quiet-btn menu-trigger" id="tabletMenu" type="button" aria-haspopup="menu" aria-expanded="false" disabled>
               Tablet actions
               <span class="caret" aria-hidden="true"></span>
@@ -81,31 +100,17 @@
           </div>
         </div>
 
+        </div>
         <!-- Everything this tablet needs you to know, before any step -->
         <div class="notices" id="notices" hidden></div>
 
-        <nav class="steps" role="tablist" aria-label="Bench steps">
-          <button class="step" role="tab" id="tab-install" aria-controls="panel-install" aria-selected="false" tabindex="-1" type="button">
-            <span class="step-n">1</span><span class="step-name">Set up</span>
-          </button>
-          <button class="step" role="tab" id="tab-provision" aria-controls="panel-provision" aria-selected="true" type="button">
-            <span class="step-n">2</span><span class="step-name">Tune</span>
-          </button>
-          <button class="step" role="tab" id="tab-verify" aria-controls="panel-verify" aria-selected="false" tabindex="-1" type="button">
-            <span class="step-n">3</span><span class="step-name">Check</span>
-          </button>
-          <button class="step" role="tab" id="tab-ship" aria-controls="panel-ship" aria-selected="false" tabindex="-1" type="button">
-            <span class="step-n">4</span><span class="step-name">Ship</span>
-          </button>
-          <button class="step step-aside" role="tab" id="tab-tools" aria-controls="panel-tools" aria-selected="false" tabindex="-1" type="button">
-            <span class="step-name">Rollback &amp; cleanup</span>
-          </button>
-        </nav>
+
 
         <div class="stage">
           <!-- 1. Set up: get the order app onto the tablet ----------------- -->
           <section class="panel" id="panel-install" role="tabpanel" aria-labelledby="tab-install" hidden>
             <div class="scroll">
+<header class="page-intro"><div><p class="eyebrow">01 / SET UP</p><h2>Start with the order app.</h2><p class="intro-note">Choose how to install it. We’ll help with permissions and background access.</p></div></header>
               <div id="installedApps"></div>
 
               <section class="block">
@@ -175,60 +180,67 @@
           <!-- 2. Tune: the audit and the plan are one read ----------------- -->
           <section class="panel" id="panel-provision" role="tabpanel" aria-labelledby="tab-provision">
             <div class="scroll">
-              <div id="plan" class="plan-host">
-                <p class="empty">Select a tablet to see exactly what would change.</p>
-              </div>
-
-              <div class="card">
-                <div class="card-head"><h3>Wallpaper with Apply</h3></div>
-                <p class="card-note" id="applyWallpaperChoice">Keep the current wallpaper.</p>
-                <div class="options">
-                  <button class="quiet-btn" id="chooseApplyWallpaper" type="button">Choose wallpaper...</button>
-                  <button class="quiet-btn" id="clearApplyWallpaper" type="button" hidden>Keep current wallpaper</button>
-                </div>
-              </div>
-
-              <details class="options-fold" id="planOptionsFold">
+<header class="page-intro"><div><p class="eyebrow">02 / TUNE TABLET</p><h2>Get ready for the counter.</h2><p class="intro-note">A clear plan for a smoother shift. Review the changes, then apply when you’re ready.</p></div></header>
+              <div id="runOutcome" class="run-outcome" role="status" hidden></div>
+              <div class="section-heading"><h3>At a glance</h3><span id="auditStamp">Waiting for a tablet</span></div>
+              <div id="quickStatus" class="status-grid" aria-live="polite"></div>
+              <div class="tune-grid">
+                <div class="tune-main"><div id="plan" class="plan-host"></div></div>
+                <aside class="tune-aside" aria-label="Personalize this run">
+                  <section class="wallpaper-card">
+                    <div class="section-icon"><svg class="icon" aria-hidden="true"><use href="icons.svg#image" /></svg></div>
+                    <h3>Make it feel like Panda.</h3>
+                    <p>A fresh look for the home and lock screens.</p>
+                    <div id="wallpaperPreview" class="wallpaper-preview" aria-hidden="true"><span>Choose a look for this tablet</span></div>
+                    <p id="applyWallpaperChoice">Keep the current wallpaper.</p>
+                    <button class="quiet-btn" id="chooseApplyWallpaper" type="button">Choose wallpaper</button>
+                    <button class="link-btn" id="clearApplyWallpaper" type="button" hidden>Keep current wallpaper</button>
+                  </section>
+                                <details class="options-fold" id="planOptionsFold">
                 <summary>
-                  <span>What to change</span>
+                  <span>Customize this run</span>
                   <span class="fold-summary" id="planOptionsSummary"></span>
                 </summary>
                 <div class="options" id="options">
                   <button class="switch" role="switch" aria-checked="false" data-opt="aggressive" type="button">
                     <span class="switch-track"><span class="switch-thumb"></span></span>
                     <span class="switch-text">
-                      <strong>Aggressive tier</strong>
+                      <strong>Include extra apps</strong>
                       <small>Also include Photos, Drive, Maps and similar. Installed apps are deleted for good; built-in apps are switched off.</small>
                     </span>
                   </button>
                   <button class="switch" role="switch" aria-checked="false" data-opt="skipSettings" type="button">
                     <span class="switch-track"><span class="switch-thumb"></span></span>
                     <span class="switch-text">
-                      <strong>Skip settings</strong>
+                      <strong>Leave settings alone</strong>
                       <small>Leave animations, timeouts and battery managers exactly as they are.</small>
                     </span>
                   </button>
                   <button class="switch" role="switch" aria-checked="false" data-opt="skipBloat" type="button">
                     <span class="switch-track"><span class="switch-thumb"></span></span>
                     <span class="switch-text">
-                      <strong>Skip debloat</strong>
+                      <strong>Leave apps alone</strong>
                       <small>Do not switch off or delete apps on this run.</small>
                     </span>
                   </button>
                   <button class="switch" role="switch" aria-checked="false" data-opt="skipAppTuning" type="button">
                     <span class="switch-track"><span class="switch-thumb"></span></span>
                     <span class="switch-text">
-                      <strong>Skip order-app tuning</strong>
+                      <strong>Leave order-app access alone</strong>
                       <small>Do not touch the doze exemption, standby bucket or background permissions.</small>
                     </span>
                   </button>
                 </div>
               </details>
 
+
+                  <div class="help-note"><svg class="icon" aria-hidden="true"><use href="icons.svg#shield" /></svg><p><strong>You’re in control.</strong> Nothing changes until you press Apply. Apps marked “Delete for good” cannot be brought back by Bench.</p></div>
+                </aside>
+              </div>
               <details class="options-fold" id="auditFold">
                 <summary>
-                  <span>What the tablet looks like</span>
-                  <span class="fold-summary">the evidence behind the plan</span>
+                  <span>Tablet details</span>
+                  <span class="fold-summary">Full audit and technical readings</span>
                 </summary>
                 <div id="auditBody" class="panel-body">
                   <p class="empty">Select a tablet to read it.</p>
@@ -239,13 +251,14 @@
             <div class="actionbar">
               <button class="primary-btn" id="runApply" type="button" disabled>Apply to tablet</button>
               <button class="quiet-btn" id="refreshPlan" type="button" disabled>Re-read tablet</button>
-              <p class="actionbar-hint">A rollback point is saved before anything changes, and Apply re-reads the tablet first, so this preview cannot go stale.</p>
+              <p class="actionbar-hint">We’ll re-read the tablet and save a restore point first. Deleted apps and their data cannot be restored.</p>
             </div>
           </section>
 
           <!-- 3. Check ---------------------------------------------------- -->
           <section class="panel" id="panel-verify" role="tabpanel" aria-labelledby="tab-verify" hidden>
             <div class="scroll">
+<header class="page-intro"><div><p class="eyebrow">03 / CHECK READINESS</p><h2>Ready for the next order?</h2><p class="intro-note">Check the tablet, then finish the hands-on steps below.</p></div></header>
               <section class="block block-inline">
                 <label class="field" for="printerHost">
                   <span>Receipt printer IP</span>
@@ -271,16 +284,16 @@
           <!-- 4. Ship ----------------------------------------------------- -->
           <section class="panel" id="panel-ship" role="tabpanel" aria-labelledby="tab-ship" hidden>
             <div class="scroll">
+<header class="page-intro"><div><p class="eyebrow">04 / HAND OVER</p><h2>Let’s check the finishing touches.</h2><p class="intro-note">Review what’s done and what still needs attention before you unplug.</p></div></header>
               <div id="shipBody" class="panel-body">
                 <p class="empty">Check readiness on step 3 first. Ship writes those results into the tablet's own record.</p>
               </div>
             </div>
 
             <div class="actionbar">
-              <button class="primary-btn" id="shipDevice" type="button" disabled>Ship tablet</button>
+              <button class="primary-btn" id="shipDevice" type="button" disabled>Finish handover</button>
               <p class="actionbar-hint">
-                Ship turns USB debugging off, because a counter tablet has an unlocked screen and with debugging on
-                anyone with a cable can do everything this tool does. It asks first, and names anything still outstanding.
+                Handover saves the checklist and turns off USB debugging. You’ll review anything still outstanding before confirming.
               </p>
             </div>
           </section>
@@ -288,6 +301,7 @@
           <!-- Rollback and cleanup: used once a month ---------------------- -->
           <section class="panel" id="panel-tools" role="tabpanel" aria-labelledby="tab-tools" hidden>
             <div class="scroll">
+<header class="page-intro"><div><p class="eyebrow">RESTORE & TOOLS</p><h2>A little help when you need it.</h2><p class="intro-note">Restore saved settings or take a closer look at installed apps. Deleted apps cannot be restored.</p></div></header>
               <section class="block">
                 <h3 class="block-head">Rollback points</h3>
                 <div id="rollbackBody" class="panel-body">
@@ -315,8 +329,8 @@
         <div class="logbar">
           <button class="log-toggle" id="logToggle" type="button" aria-expanded="false" aria-controls="logDrawer">
             <span class="caret" aria-hidden="true"></span>
-            <span>Log</span>
-            <span class="log-last" id="logLast">Nothing run yet.</span>
+            <span>Activity</span>
+            <span class="log-last" id="logLast">Your activity will appear here.</span>
           </button>
           <button class="link-btn" id="clearLog" type="button">Clear</button>
         </div>
@@ -327,24 +341,23 @@
     </div>
 
     <!-- ------------------------------------------------------------------ -->
-    <!-- Wallpaper. A dialog rather than a card, because it is a once-per-    -->
-    <!-- tablet job that ends in a tap on the tablet's own screen.            -->
+    <!-- Wallpaper choices, shared by Apply and the standalone tablet action. -->
     <!-- ------------------------------------------------------------------ -->
     <div class="modal-backdrop" id="wallpaperModal" hidden>
       <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="wallpaperTitle">
-        <h3 id="wallpaperTitle">Set wallpaper</h3>
+        <h3 id="wallpaperTitle">Give this tablet a fresh look</h3>
         <p class="modal-note">
           Choose a bundled wallpaper or your own image. Bench fills both home and lock screens with a
           centered crop, keeps the image in proportion, and saves the old wallpaper for Revert.
           If the tablet refuses, Bench opens its picker and reports that a tap is still needed.
         </p>
         <div id="wallpaperBlocked"></div>
-        <div class="wallpapers" id="wallpapers"></div>
-        <button class="quiet-btn" id="queueWallpaper" type="button">Use this wallpaper with Apply</button>
+        <div class="wallpapers" id="wallpapers" role="radiogroup" aria-label="Wallpaper choices"></div>
         <div class="modal-foot">
           <button class="quiet-btn" id="chooseWallpaper" type="button">Use my own image...</button>
           <span class="modal-spacer"></span>
           <button class="quiet-btn" id="wallpaperDismiss" type="button">Close</button>
+          <button class="primary-btn" id="queueWallpaper" type="button">Use with Apply</button>
           <button class="primary-btn" id="setWallpaper" type="button" disabled>Send to tablet</button>
         </div>
       </div>
@@ -368,6 +381,7 @@
       </div>
     </div>
 
+    <script src="presentation.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
