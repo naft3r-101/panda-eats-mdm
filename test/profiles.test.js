@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const profiles = require('../electron/profiles');
 
 test('settings.txt parses into known scopes with the lines this profile promises', () => {
-  const settings = profiles.loadSettings();
+  const settings = profiles.loadSettings('samsung');
   assert.ok(settings.length >= 20);
   for (const s of settings) {
     assert.ok(['global', 'system', 'secure'].includes(s.scope), `bad scope on ${s.key}`);

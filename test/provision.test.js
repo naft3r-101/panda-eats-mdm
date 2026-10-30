@@ -101,9 +101,9 @@ test('buildPlan treats a denied runtime permission as an order-app fix', () => {
 test('buildPlan excludes protected and already-disabled packages', () => {
   const report = cleanReport({
     bloat: [
-      { pkg: 'com.samsung.android.bixby.agent', disabled: false, protected: false },
-      { pkg: 'com.samsung.android.honeyboard', disabled: false, protected: true },
-      { pkg: 'com.facebook.katana', disabled: true, protected: false },
+      { pkg: 'com.samsung.android.bixby.agent', disabled: false, protected: false, action: 'disable' },
+      { pkg: 'com.samsung.android.honeyboard', disabled: false, protected: true, action: 'protected' },
+      { pkg: 'com.facebook.katana', disabled: true, protected: false, action: 'disable' },
     ],
     blocked: ['com.samsung.android.honeyboard'],
   });

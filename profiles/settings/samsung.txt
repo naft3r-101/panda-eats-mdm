@@ -1,0 +1,3 @@
+# One UI 6.1 Maximum stops at 80%. Older One UI versions use 85%.
+global protect_battery 1
+global adaptive_fast_charging 0

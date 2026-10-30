@@ -24,6 +24,13 @@
 const { execFile } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+
+// The adb server inherits this directory and can keep it locked on Windows.
+function adbWorkingDirectory() {
+  const dir = process.platform === 'win32' && fs.existsSync('D:\\tmp') ? 'D:\\tmp' : os.tmpdir();
+  return dir;
+}
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_BUFFER = 64 * 1024 * 1024; // dumpsys package on a stock Samsung is multi-MB
@@ -133,7 +140,7 @@ function run(args, opts = {}) {
   const bin = resolveAdb();
 
   return new Promise((resolve) => {
-    execFile(bin, argv, { timeout, maxBuffer: MAX_BUFFER, windowsHide: true }, (err, stdout, stderr) => {
+    execFile(bin, argv, { cwd: adbWorkingDirectory(), timeout, maxBuffer: MAX_BUFFER, windowsHide: true }, (err, stdout, stderr) => {
       const out = normalise(stdout).trim();
       const errText = normalise(stderr).trim();
       if (err && err.code === 'ENOENT') {
@@ -154,6 +161,18 @@ function run(args, opts = {}) {
         argv,
       });
     });
+  });
+}
+
+/** Binary content-provider transfers must never pass through text normalisation. */
+function runBinary(serial, args, input = null) {
+  return new Promise((resolve) => {
+    const child = execFile(resolveAdb(), ['-s', serial, ...args], {
+      cwd: adbWorkingDirectory(), encoding: 'buffer', timeout: 60000,
+      maxBuffer: MAX_BUFFER, windowsHide: true,
+    }, (err, stdout, stderr) => resolve({ ok: !err, stdout, stderr: String(stderr || '') }));
+    child.stdin.on('error', () => {});
+    child.stdin.end(input);
   });
 }
 
@@ -374,6 +393,26 @@ async function disablePackage(serial, pkg) {
 
 async function enablePackage(serial, pkg) {
   return shell(`pm enable ${pkg}`, { serial });
+}
+
+function parsePackagePaths(text) {
+  return toLines(text).filter(line => line.startsWith('package:')).map(line => line.slice(8));
+}
+
+function packageLocation(paths) {
+  if (!paths.length) return 'unknown';
+  if (paths.every(p => /^\/data\/app\//.test(p))) return 'data';
+  if (paths.every(p => /^\/(?:system|system_ext|product|vendor|odm|oem)\//.test(p))) return 'system';
+  return 'unknown';
+}
+
+async function getPackagePaths(serial, pkg) {
+  const r = await shell(`pm path --user 0 ${pkg}`, { serial });
+  return r.ok ? parsePackagePaths(r.stdout) : [];
+}
+
+async function uninstallProfilePackage(serial, pkg) {
+  return shell(`pm uninstall ${pkg}`, { serial, timeout: 120000 });
 }
 
 // ---------------------------------------------------------------------------
@@ -703,7 +742,7 @@ async function getMediaVolume(serial) {
 
 async function setMediaVolume(serial, value) {
   const r = await shell(`cmd media_session volume --stream 3 --set ${value}`, { serial });
-  if (r.ok && !/not found|Exception/i.test(r.stdout + r.stderr)) return r;
+  if (r.ok && (await getMediaVolume(serial)).current === value) return r;
   return shell(`media volume --stream 3 --set ${value}`, { serial });
 }
 
@@ -863,13 +902,13 @@ async function launchApp(serial, pkg) {
 // ---------------------------------------------------------------------------
 
 /**
- * Setting the wallpaper image outright is NOT possible over adb.
+ * Setting the wallpaper image needs an app, implemented in wallpaper.js.
  * `cmd wallpaper` exists but only exposes dimming - there is no `set`. Verified
  * on an SM-T227U on Android 14 and again on an onn 7 core on Android 14, where
  * `cmd wallpaper help` still lists nothing but set-dim-amount, dim-with-uid and
  * get-dim-amount.
  *
- * What DOES work is this three-step dance: push the file, register it with
+ * The manual fallback is: push the file, register it with
  * MediaStore so it has a content:// identity, then open a picker against that
  * URI with a read grant. The operator taps Set wallpaper and picks home/lock.
  * A file:// URI silently fails at the same step, which is why the MediaStore
@@ -880,7 +919,10 @@ async function pushFile(serial, localPath, devicePath) {
 }
 
 async function indexInMediaStore(serial, devicePath) {
-  return shell(`content call --uri content://media/external --method scan_file --arg ${devicePath}`, { serial });
+  const r = await shell(`content call --uri content://media/external --method scan_file --arg ${devicePath}`, { serial });
+  // Android 10's provider expects a different call bundle and throws despite exit 0.
+  if (r.ok && !/Exception|Error/i.test(r.stdout + r.stderr)) return r;
+  return shell(`am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://${devicePath}`, { serial });
 }
 
 /** MediaStore rewrites /sdcard to /storage/emulated/0, so match on basename. */
@@ -1227,6 +1269,13 @@ async function ensureDeviceDir(serial, devicePath) {
 }
 
 module.exports = {
+  parsePackagePaths,
+  packageLocation,
+  getPackagePaths,
+  uninstallProfilePackage,
+  parsePackageList,
+  adbWorkingDirectory,
+  runBinary,
   resolveAdb,
   bundledAdb,
   bundledAdbVersion,

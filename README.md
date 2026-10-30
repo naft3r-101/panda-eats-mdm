@@ -4,11 +4,12 @@ Tablet setup tool for Panda Eats order-taking tablets.
 
 Plug a tablet into a Windows PC over USB, check it, press Apply, and it comes out ready for
 all-day counter duty: the screen stays on, the sound stays up, the order app is allowed to keep
-running in the background, and preinstalled apps it does not need are switched off.
+running in the background, and apps named in its bloat profiles are removed or switched off.
 
-**No root. No factory reset. Everything reversible.** It works over `adb`, so it is safe on a
-tablet that is already in use at a restaurant. Every Apply saves a rollback point before it
-changes anything, and nothing is uninstalled: apps are only disabled, and come back on rollback.
+**No root. No factory reset.** Built-in apps are switched off and can be restored. Profile-named
+apps installed in /data/app are deleted for good with their data. The audit and Apply plan list
+permanent deletions separately, and protected and Panda Eats apps are never removed. Every Apply
+saves a record first, but Bench cannot restore deleted apps or their data.
 
 ## Install
 

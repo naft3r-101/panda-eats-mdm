@@ -1,0 +1,3 @@
+# TB-8505F Settings > Battery > Battery protection mode.
+# Off/on changes only this key. The tablet says charging stops at 60%.
+system battery_protected_charge 1

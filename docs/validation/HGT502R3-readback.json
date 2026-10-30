@@ -1,0 +1,160 @@
+{
+  "wallpaper": {
+    "homeId": 19,
+    "lockId": 20,
+    "readable": true
+  },
+  "battery": {
+    "scope": "system",
+    "key": "battery_protected_charge",
+    "desired": "1",
+    "current": "1",
+    "ok": true,
+    "supported": true
+  },
+  "duraspeed": {
+    "packageDisabled": true,
+    "settings": [
+      {
+        "scope": "system",
+        "key": "setting.duraspeed.enabled",
+        "desired": "0",
+        "current": "0",
+        "ok": true,
+        "supported": true
+      },
+      {
+        "scope": "global",
+        "key": "setting.duraspeed.enabled",
+        "desired": "0",
+        "current": "0",
+        "ok": true,
+        "supported": true
+      }
+    ],
+    "ok": true
+  },
+  "helperDisabled": true,
+  "dolbyEngineEnabled": true,
+  "disposableAbsent": true,
+  "plan": {
+    "settings": [
+      {
+        "scope": "global",
+        "key": "app_standby_enabled",
+        "desired": "0",
+        "current": "1",
+        "ok": false,
+        "supported": true
+      }
+    ],
+    "packages": [],
+    "uninstallPackages": [],
+    "apps": [],
+    "levels": [],
+    "lockScreen": null,
+    "wallpaper": null,
+    "blocked": [],
+    "total": 1
+  },
+  "packages": [
+    {
+      "pkg": "com.android.wantjoin.childmode.ctrl",
+      "paths": [
+        "/system/priv-app/KidCtrl/KidCtrl.apk"
+      ],
+      "location": "system",
+      "profileNamed": true,
+      "action": "disable",
+      "disabled": true,
+      "protected": false,
+      "protectedReason": null,
+      "tier": "safe",
+      "note": null
+    },
+    {
+      "pkg": "com.android.wantjoin.settings",
+      "paths": [
+        "/system/priv-app/MultiUserSetting/MultiUserSetting.apk"
+      ],
+      "location": "system",
+      "profileNamed": true,
+      "action": "disable",
+      "disabled": true,
+      "protected": false,
+      "protectedReason": null,
+      "tier": "safe",
+      "note": null
+    },
+    {
+      "pkg": "com.dolby.daxappui",
+      "paths": [
+        "/system/app/DaxUI/DaxUI.apk"
+      ],
+      "location": "system",
+      "profileNamed": true,
+      "action": "disable",
+      "disabled": true,
+      "protected": false,
+      "protectedReason": null,
+      "tier": "safe",
+      "note": "Dolby Audio controls only. The audio engine stays enabled for order chimes."
+    },
+    {
+      "pkg": "com.lmsa.app.lmsapad",
+      "paths": [
+        "/system/app/LTHD/LTHD.apk"
+      ],
+      "location": "system",
+      "profileNamed": true,
+      "action": "disable",
+      "disabled": true,
+      "protected": false,
+      "protectedReason": null,
+      "tier": "safe",
+      "note": null
+    },
+    {
+      "pkg": "com.motorola.demo",
+      "paths": [
+        "/system/priv-app/DemoMode/DemoMode.apk"
+      ],
+      "location": "system",
+      "profileNamed": true,
+      "action": "disable",
+      "disabled": true,
+      "protected": false,
+      "protectedReason": null,
+      "tier": "safe",
+      "note": null
+    },
+    {
+      "pkg": "com.tblenovo.whatsnewclient",
+      "paths": [
+        "/system/priv-app/LenovoWhatsNewClient/LenovoWhatsNewClient.apk"
+      ],
+      "location": "system",
+      "profileNamed": true,
+      "action": "disable",
+      "disabled": true,
+      "protected": false,
+      "protectedReason": null,
+      "tier": "safe",
+      "note": null
+    },
+    {
+      "pkg": "com.verizon.remoteSimlock",
+      "paths": [
+        "/system/app/VZWRemoteSimlockService/VZWRemoteSimlockService.apk"
+      ],
+      "location": "system",
+      "profileNamed": true,
+      "action": "disable",
+      "disabled": true,
+      "protected": false,
+      "protectedReason": null,
+      "tier": "safe",
+      "note": null
+    }
+  ]
+}

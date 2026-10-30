@@ -1,4 +1,4 @@
-# Lenovo / ZUI bloat - the TB-X606F (Tab M10 FHD Plus) profile.
+# Lenovo / ZUI bloat - TB-X606F (Tab M10) and TB-8505F (Tab M8 HD).
 #
 # This is the bench reference device, not a fleet device. Matched on
 # ro.product.manufacturer = lenovo.
@@ -30,6 +30,30 @@ com.lenovo.dcmonitor
 com.lenovo.anyshare.gps
 com.ucturbo
 com.pandasuite.viewer
+
+# TB-8505F, Android 10. pm path decides: uninstall /data/app; disable built-in apps.
+com.motorola.demo
+com.tblenovo.whatsnewclient
+com.android.wantjoin.settings
+com.android.wantjoin.childmode.ctrl
+com.lmsa.app.lmsapad
+com.verizon.remoteSimlock
+# The app only. daxservice is the audio engine and must stay enabled.
+com.dolby.daxappui
+com.dti.lenovo.tablet
+com.king.candycrushsaga
+com.pandora.android
+com.particlenews.newsbreak
+com.futureplay.boots
+com.pivotmobile.android.metrics
+com.upgenicsint.phonechecklite
+
+# Previous operator's order app and kiosk software.
+com.grubhub.android.orderhub
+com.grubhub.android.orderhub.settings
+com.grubhub.android.orderhub.installer
+com.grubhub.android.orderhub.recovery
+com.gears42.surelock
 
 # --- Gaming / kids ----------------------------------------------------------
 com.zui.game
